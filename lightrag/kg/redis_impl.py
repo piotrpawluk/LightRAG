@@ -57,6 +57,9 @@ REDIS_VECTOR_DIM_KEY = "redis_vdb_dim"
 REDIS_HNSW_M = int(os.getenv("REDIS_HNSW_M", "16"))
 REDIS_HNSW_EF_CONSTRUCTION = int(os.getenv("REDIS_HNSW_EF_CONSTRUCTION", "256"))
 
+# Key prefix for multi-instance isolation (allows multiple LightRAG instances to share the same Redis)
+REDIS_KEY_PREFIX = os.getenv("REDIS_KEY_PREFIX", "").strip()
+
 # Edge fields that should be converted to numeric types when retrieved from Redis
 # Redis stores all values as strings, so we need to convert these back to their proper types
 NUMERIC_EDGE_FIELDS = {"weight"}
@@ -165,15 +168,20 @@ class RedisKVStorage(BaseKVStorage):
         # Build final_namespace with workspace prefix for data isolation
         # Keep original namespace unchanged for type detection logic
         if effective_workspace:
-            self.final_namespace = f"{effective_workspace}_{self.namespace}"
+            base_namespace = f"{effective_workspace}_{self.namespace}"
+        else:
+            base_namespace = self.namespace
+            self.workspace = ""
+
+        # Apply global key prefix for multi-instance isolation
+        if REDIS_KEY_PREFIX:
+            self.final_namespace = f"{REDIS_KEY_PREFIX}:{base_namespace}"
             logger.debug(
-                f"Final namespace with workspace prefix: '{self.final_namespace}'"
+                f"Final namespace with key prefix: '{self.final_namespace}'"
             )
         else:
-            # When workspace is empty, final_namespace equals original namespace
-            self.final_namespace = self.namespace
-            self.workspace = ""
-            logger.debug(f"Final namespace (no workspace): '{self.final_namespace}'")
+            self.final_namespace = base_namespace
+            logger.debug(f"Final namespace: '{self.final_namespace}'")
 
         self._redis_url = os.environ.get(
             "REDIS_URI", config.get("redis", "uri", fallback="redis://localhost:6379")
@@ -558,16 +566,21 @@ class RedisDocStatusStorage(DocStatusStorage):
         # Build final_namespace with workspace prefix for data isolation
         # Keep original namespace unchanged for type detection logic
         if effective_workspace:
-            self.final_namespace = f"{effective_workspace}_{self.namespace}"
+            base_namespace = f"{effective_workspace}_{self.namespace}"
+        else:
+            base_namespace = self.namespace
+            self.workspace = "_"
+
+        # Apply global key prefix for multi-instance isolation
+        if REDIS_KEY_PREFIX:
+            self.final_namespace = f"{REDIS_KEY_PREFIX}:{base_namespace}"
             logger.debug(
-                f"[{self.workspace}] Final namespace with workspace prefix: '{self.namespace}'"
+                f"[{self.workspace}] Final namespace with key prefix: '{self.final_namespace}'"
             )
         else:
-            # When workspace is empty, final_namespace equals original namespace
-            self.final_namespace = self.namespace
-            self.workspace = "_"
+            self.final_namespace = base_namespace
             logger.debug(
-                f"[{self.workspace}] Final namespace (no workspace): '{self.namespace}'"
+                f"[{self.workspace}] Final namespace: '{self.final_namespace}'"
             )
 
         self._redis_url = os.environ.get(
@@ -1170,19 +1183,22 @@ class RedisVectorStorage(BaseVectorStorage):
         workspace_from_env = os.environ.get("REDIS_WORKSPACE")
         if workspace_from_env:
             self.workspace = workspace_from_env
-            self.final_namespace = f"{workspace_from_env}_{self.namespace}"
-            logger.debug(
-                f"Final namespace with workspace prefix: '{self.final_namespace}'"
-            )
+            base_namespace = f"{workspace_from_env}_{self.namespace}"
         elif self.workspace:
-            self.final_namespace = f"{self.workspace}_{self.namespace}"
+            base_namespace = f"{self.workspace}_{self.namespace}"
+        else:
+            base_namespace = self.namespace
+            self.workspace = ""
+
+        # Apply global key prefix for multi-instance isolation
+        if REDIS_KEY_PREFIX:
+            self.final_namespace = f"{REDIS_KEY_PREFIX}:{base_namespace}"
             logger.debug(
-                f"Final namespace with workspace prefix: '{self.final_namespace}'"
+                f"Final namespace with key prefix: '{self.final_namespace}'"
             )
         else:
-            self.final_namespace = self.namespace
-            self.workspace = ""
-            logger.debug(f"Final namespace (no workspace): '{self.final_namespace}'")
+            self.final_namespace = base_namespace
+            logger.debug(f"Final namespace: '{self.final_namespace}'")
 
         self.effective_workspace = self.workspace or "default"
 
@@ -1756,19 +1772,22 @@ class RedisGraphStorage(BaseGraphStorage):
         workspace_from_env = os.environ.get("REDIS_WORKSPACE")
         if workspace_from_env:
             self.workspace = workspace_from_env
-            self.final_namespace = f"{workspace_from_env}_{self.namespace}"
-            logger.debug(
-                f"Final namespace with workspace prefix: '{self.final_namespace}'"
-            )
+            base_namespace = f"{workspace_from_env}_{self.namespace}"
         elif self.workspace:
-            self.final_namespace = f"{self.workspace}_{self.namespace}"
+            base_namespace = f"{self.workspace}_{self.namespace}"
+        else:
+            base_namespace = self.namespace
+            self.workspace = ""
+
+        # Apply global key prefix for multi-instance isolation
+        if REDIS_KEY_PREFIX:
+            self.final_namespace = f"{REDIS_KEY_PREFIX}:{base_namespace}"
             logger.debug(
-                f"Final namespace with workspace prefix: '{self.final_namespace}'"
+                f"Final namespace with key prefix: '{self.final_namespace}'"
             )
         else:
-            self.final_namespace = self.namespace
-            self.workspace = ""
-            logger.debug(f"Final namespace (no workspace): '{self.final_namespace}'")
+            self.final_namespace = base_namespace
+            logger.debug(f"Final namespace: '{self.final_namespace}'")
 
         # Redis connection setup
         self._redis_url = os.environ.get(

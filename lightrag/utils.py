@@ -46,6 +46,36 @@ from lightrag.constants import (
 # Precompile regex pattern for JSON sanitization (module-level, compiled once)
 _SURROGATE_PATTERN = re.compile(r"[\uD800-\uDFFF\uFFFE\uFFFF]")
 
+# Fast JSON serialization with orjson fallback
+# orjson is 3-10x faster than standard json for serialization
+try:
+    import orjson
+
+    def fast_json_dumps(obj: Any, ensure_ascii: bool = False) -> str:
+        """Fast JSON serialization using orjson with fallback to standard json.
+
+        Args:
+            obj: Object to serialize
+            ensure_ascii: If True, escape non-ASCII characters (not supported by orjson,
+                         falls back to standard json)
+
+        Returns:
+            JSON string
+        """
+        if ensure_ascii:
+            # orjson doesn't support ensure_ascii, fallback to standard json
+            return json.dumps(obj, ensure_ascii=True)
+        return orjson.dumps(obj, option=orjson.OPT_NON_STR_KEYS).decode("utf-8")
+
+    _HAS_ORJSON = True
+except ImportError:
+
+    def fast_json_dumps(obj: Any, ensure_ascii: bool = False) -> str:
+        """Standard JSON serialization fallback when orjson is not available."""
+        return json.dumps(obj, ensure_ascii=ensure_ascii)
+
+    _HAS_ORJSON = False
+
 
 class SafeStreamHandler(logging.StreamHandler):
     """StreamHandler that gracefully handles closed streams during shutdown.
@@ -1409,6 +1439,65 @@ def truncate_list_by_token_size(
         if tokens > max_token_size:
             return list_data[:i]
     return list_data
+
+
+# Average characters per token ratio (empirically ~4 for English text)
+_CHARS_PER_TOKEN_APPROX = 4
+
+
+def truncate_list_by_token_size_fast(
+    list_data: list[Any],
+    key: Callable[[Any], str],
+    max_token_size: int,
+    tokenizer: Tokenizer,
+) -> list[Any]:
+    """
+    Optimized truncation using approximate character-based filtering
+    before precise token counting.
+
+    This reduces tokenizer.encode() calls by ~50% for large lists by:
+    1. Using character count heuristic (~4 chars/token) for initial filtering
+    2. Only doing precise counting for items near the estimated cutoff
+
+    Args:
+        list_data: List of items to truncate
+        key: Function to extract string from each item
+        max_token_size: Maximum total tokens allowed
+        tokenizer: Tokenizer instance for precise counting
+
+    Returns:
+        Truncated list that fits within max_token_size
+    """
+    if max_token_size <= 0:
+        return []
+
+    if not list_data:
+        return list_data
+
+    # Pre-compute all strings once
+    strings = [key(data) for data in list_data]
+
+    # Phase 1: Use approximate counting to find rough cutoff
+    # Add 30% buffer to avoid cutting too early
+    approx_max_chars = int(max_token_size * _CHARS_PER_TOKEN_APPROX * 1.3)
+    approx_chars = 0
+    approx_cutoff = len(list_data)
+
+    for i, s in enumerate(strings):
+        approx_chars += len(s)
+        if approx_chars > approx_max_chars:
+            # Found approximate cutoff, add small buffer for precision phase
+            approx_cutoff = min(i + 5, len(list_data))
+            break
+
+    # Phase 2: Precise token counting only for items up to approx_cutoff
+    tokens = 0
+    for i in range(approx_cutoff):
+        tokens += len(tokenizer.encode(strings[i]))
+        if tokens > max_token_size:
+            return list_data[:i]
+
+    return list_data[:approx_cutoff]
 
 
 def cosine_similarity(v1, v2):
