@@ -1,0 +1,50 @@
+results[5]:
+{id,pmid,title,abstractText,urls,publicationYear,citedByCount,relevanceScore,compressionHint}
+W2068398835,,Effects and mechanisms of berberine in diabetes treatment,,"
+  openAccess: 
+  allLinks: 
+    [1]:
+      {url,type,version,sourceName,isPdf,license}
+      https://doaj.org/article/2736cb67fa384a8fbeda5b6212490c1c,landing_page,submittedVersion,DOAJ (DOAJ: Directory of Open Access Journals),false,cc-by-sa
+
+",2012,171,857.0892,
+W2750794793,,Wearable Continuous Glucose Monitoring Sensors: A Revolution in Diabetes Treatment,"Worldwide, the number of people affected by diabetes is rapidly increasing due to aging populations and sedentary lifestyles, with the prospect of exceeding 500 million cases in 2030, resulting in one of the most challenging socio-health emergencies of the third millennium. Daily management of diabetes by patients relies on the capability of correctly measuring glucose concentration levels in the blood by using suitable sensors. In recent years, glucose monitoring has been revolutionized by the development of Continuous Glucose Monitoring (CGM) sensors, wearable non/minimally-invasive devices that measure glucose concentration by exploiting different physical principles, e.g., glucose-oxidase, fluorescence, or skin dielectric properties, and provide real-time measurements every 1–5 min. CGM opened new challenges in different disciplines, e.g., medicine, physics, electronics, chemistry, ergonomics, data/signal processing, and software development to mention but a few. This paper first makes an overview of wearable CGM sensor technologies, covering both commercial devices and research prototypes. Then, the role of CGM in the actual evolution of decision support systems for diabetes therapy is discussed. Finally, the paper presents new possible horizons for wearable CGM sensor applications and perspectives in terms of big data analytics for personalized and proactive medicine.","
+  openAccess: 
+  allLinks: 
+    [5]:
+      {url,type,version,sourceName,isPdf,license}
+      https://www.mdpi.com/2079-9292/6/3/65/pdf?version=1504866036,pdf,publishedVersion,Electronics,true,cc-by
+      https://doi.org/10.3390/electronics6030065,landing_page,publishedVersion,Electronics,false,cc-by
+      https://doaj.org/article/e92f3b54847649ad956317790556ed31,landing_page,submittedVersion,DOAJ (DOAJ: Directory of Open Access Journals),false,cc-by-sa
+      http://hdl.handle.net/11577/3263824,landing_page,submittedVersion,Padua Research Archive (University of Padua),false,cc-by
+      https://dx.doi.org/10.3390/electronics6030065,landing_page,submittedVersion,MDPI (MDPI AG),false,cc-by
+
+",2017,229,841.88885,
+W3165239041,https://pubmed.ncbi.nlm.nih.gov/34081407,A Fully Integrated Closed‐Loop System Based on Mesoporous Microneedles‐Iontophoresis for Diabetes Treatment,"Abstract A closed‐loop system that can mini‐invasively track blood glucose and intelligently treat diabetes is in great demand for modern medicine, yet it remains challenging to realize. Microneedles technologies have recently emerged as powerful tools for transdermal applications with inherent painlessness and biosafety. In this work, for the first time to the authors' knowledge, a fully integrated wearable closed‐loop system (IWCS) based on mini‐invasive microneedle platform is developed for in situ diabetic sensing and treatment. The IWCS consists of three connected modules: 1) a mesoporous microneedle‐reverse iontophoretic glucose sensor; 2) a flexible printed circuit board as integrated and control; and 3) a microneedle‐iontophoretic insulin delivery component. As the key component, mesoporous microneedles enable the painless penetration of stratum corneum, implementing subcutaneous substance exchange. The coupling with iontophoresis significantly enhances glucose extraction and insulin delivery and enables electrical control. This IWCS is demonstrated to accurately monitor glucose fluctuations, and responsively deliver insulin to regulate hyperglycemia in diabetic rat model. The painless microneedles and wearable design endows this IWCS as a highly promising platform to improve the therapies of diabetic patients.","
+  openAccess: 
+  allLinks: 
+    [2]:
+      {url,type,version,sourceName,isPdf,license}
+      https://doi.org/10.1002/advs.202100827,landing_page,publishedVersion,Advanced Science,false,cc-by
+      https://doaj.org/article/ba53b9e383254ef2acc4597f17774280,landing_page,submittedVersion,DOAJ (DOAJ: Directory of Open Access Journals),false,cc-by-sa
+
+",2021,205,736.33026,
+W2801605705,https://pubmed.ncbi.nlm.nih.gov/29747423,Use of Diabetes Treatment Satisfaction Questionnaire in Diabetes Care: Importance of Patient-Reported Outcomes,"The efficacy of diabetes treatment should not be evaluated solely by HbA1c levels as they should also focus on patient-reported outcomes (PROs), such as patient satisfaction, wellbeing and quality of life. The Diabetes Treatment Satisfaction Questionnaire (DTSQ) has been developed to assess patient satisfaction with diabetes treatment. DTSQ has been translated into more than 100 languages and is widely used in many countries, since it is relatively easy to answer and is used for both patients with and without medical therapy. Novel therapeutic options, such as insulin analogs, incretin-based therapy and sodium-glucose cotransporter 2 (SGLT2) inhibitors, have been shown to improve patient satisfaction using DTSQ for assessments. DTSQ is not only used for comparisons between different medications or treatment strategies, but also can be used to assess the quality of diabetes care in clinical settings. This is important as an improvement in treatment satisfaction may enhance patients’ self-efficacy and adherence to therapy, leading to the achievement of long-term stable glycemic control and reduced risk of diabetic complications. In this review, we summarize the current topics in DTSQ, introducing our own experience, and discuss the role of PROs in diabetes treatment.","
+  openAccess: 
+  allLinks: 
+    [3]:
+      {url,type,version,sourceName,isPdf,license}
+      https://www.mdpi.com/1660-4601/15/5/947/pdf?version=1525872292,pdf,publishedVersion,International Journal of Environmental Research and Public Health,true,cc-by
+      https://doi.org/10.3390/ijerph15050947,landing_page,publishedVersion,International Journal of Environmental Research and Public Health,false,cc-by
+      https://dx.doi.org/10.3390/ijerph15050947,landing_page,submittedVersion,MDPI (MDPI AG),false,cc-by
+
+",2018,124,727.992,
+W2523536075,https://pubmed.ncbi.nlm.nih.gov/29147685,Stimuli‐responsive delivery of therapeutics for diabetes treatment,"Abstract Diabetic therapeutics, including insulin and glucagon‐like peptide 1 (GLP‐1), are essential for diabetic patients to regulate blood glucose levels. However, conventional treatments that are based on subcutaneous injections are often associated with poor glucose control and a lack of patient compliance. In this review, we focus on the different stimuli‐responsive systems to deliver therapeutics for diabetes treatment to improve patient comfort and prevent complications. Specifically, the pH‐responsive systems for oral drug delivery are introduced first. Then, the closed‐loop glucose‐responsive systems are summarized based on different glucose‐responsive moieties, including glucose oxidase, glucose binding protein, and phenylboronic acid. Finally, the on‐demand delivery systems activated by external remote triggers are also discussed. We conclude by discussing advantages and limitations of current strategies, as well as future opportunities and challenges in this area.","
+  openAccess: 
+  allLinks: 
+    [2]:
+      {url,type,version,sourceName,isPdf,license}
+      https://onlinelibrary.wiley.com/doi/pdfdirect/10.1002/btm2.10036,pdf,publishedVersion,Bioengineering & Translational Medicine,true,cc-by
+      https://doi.org/10.1002/btm2.10036,landing_page,publishedVersion,Bioengineering & Translational Medicine,false,cc-by
+
+",2016,98,714.3373,

@@ -1,0 +1,35 @@
+# Patterns to ignore when building packages.
+# Similar to .gitignore
+
+# Development files
+*.md~
+*.swp
+*.swo
+*~
+
+# Git files
+.git/
+.gitignore
+
+# CI/CD
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Sensitive files
+values-prod-secrets.yaml
+*.secret.yaml
+.env
+
+# Test files
+test/
+tests/

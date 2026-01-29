@@ -108,18 +108,18 @@ async def zhipu_complete(
 
     if keyword_extraction:
         # Add a system prompt to guide the model to return JSON format
-        extraction_prompt = """You are a helpful assistant that extracts keywords from text.
-        Please analyze the content and extract two types of keywords:
-        1. High-level keywords: Important concepts and main themes
-        2. Low-level keywords: Specific details and supporting elements
+        extraction_prompt = """Jesteś pomocnym asystentem, który wyodrębnia słowa kluczowe z tekstu. WSZYSTKIE odpowiedzi MUSZĄ być w języku polskim.
+Proszę przeanalizować treść i wyodrębnić dwa typy słów kluczowych:
+1. Słowa kluczowe wysokiego poziomu: Ważne koncepcje i główne tematy
+2. Słowa kluczowe niskiego poziomu: Konkretne szczegóły i elementy wspierające
 
-        Return your response in this exact JSON format:
-        {
-            "high_level_keywords": ["keyword1", "keyword2"],
-            "low_level_keywords": ["keyword1", "keyword2", "keyword3"]
-        }
+Zwróć odpowiedź dokładnie w tym formacie JSON:
+{
+    "high_level_keywords": ["słowo_kluczowe1", "słowo_kluczowe2"],
+    "low_level_keywords": ["słowo_kluczowe1", "słowo_kluczowe2", "słowo_kluczowe3"]
+}
 
-        Only return the JSON, no other text."""
+Zwróć tylko JSON, bez żadnego innego tekstu."""
 
         # Combine with existing system prompt if any
         if system_prompt:

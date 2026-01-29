@@ -1379,16 +1379,47 @@ def configure_logging():
         logger.handlers = []
         logger.filters = []
 
+    # Check if file logging should be disabled (for containers with read-only filesystems)
+    disable_file_logging = os.getenv("DISABLE_FILE_LOGGING", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+
     # Get log directory path from environment variable
     log_dir = os.getenv("LOG_DIR", os.getcwd())
     log_file_path = os.path.abspath(os.path.join(log_dir, DEFAULT_LOG_FILENAME))
 
-    print(f"\nLightRAG log file: {log_file_path}\n")
-    os.makedirs(os.path.dirname(log_dir), exist_ok=True)
+    if not disable_file_logging:
+        print(f"\nLightRAG log file: {log_file_path}\n")
+        os.makedirs(os.path.dirname(log_dir), exist_ok=True)
+    else:
+        print("\nFile logging disabled (DISABLE_FILE_LOGGING=true)\n")
 
     # Get log file max size and backup count from environment variables
     log_max_bytes = get_env_value("LOG_MAX_BYTES", DEFAULT_LOG_MAX_BYTES, int)
     log_backup_count = get_env_value("LOG_BACKUP_COUNT", DEFAULT_LOG_BACKUP_COUNT, int)
+
+    # Build handlers dict - only include file handler if not disabled
+    handlers = {
+        "console": {
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+        },
+    }
+    if not disable_file_logging:
+        handlers["file"] = {
+            "formatter": "detailed",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": log_file_path,
+            "maxBytes": log_max_bytes,
+            "backupCount": log_backup_count,
+            "encoding": "utf-8",
+        }
+
+    # Determine which handlers to use for loggers
+    logger_handlers = ["console"] if disable_file_logging else ["console", "file"]
 
     logging.config.dictConfig(
         {
@@ -1402,41 +1433,27 @@ def configure_logging():
                     "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
                 },
             },
-            "handlers": {
-                "console": {
-                    "formatter": "default",
-                    "class": "logging.StreamHandler",
-                    "stream": "ext://sys.stderr",
-                },
-                "file": {
-                    "formatter": "detailed",
-                    "class": "logging.handlers.RotatingFileHandler",
-                    "filename": log_file_path,
-                    "maxBytes": log_max_bytes,
-                    "backupCount": log_backup_count,
-                    "encoding": "utf-8",
-                },
-            },
+            "handlers": handlers,
             "loggers": {
                 # Configure all uvicorn related loggers
                 "uvicorn": {
-                    "handlers": ["console", "file"],
+                    "handlers": logger_handlers,
                     "level": "INFO",
                     "propagate": False,
                 },
                 "uvicorn.access": {
-                    "handlers": ["console", "file"],
+                    "handlers": logger_handlers,
                     "level": "INFO",
                     "propagate": False,
                     "filters": ["path_filter"],
                 },
                 "uvicorn.error": {
-                    "handlers": ["console", "file"],
+                    "handlers": logger_handlers,
                     "level": "INFO",
                     "propagate": False,
                 },
                 "lightrag": {
-                    "handlers": ["console", "file"],
+                    "handlers": logger_handlers,
                     "level": "INFO",
                     "propagate": False,
                     "filters": ["path_filter"],

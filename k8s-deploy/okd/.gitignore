@@ -1,0 +1,4 @@
+# Protect sensitive files from being committed
+secret.yaml
+*.secret.yaml
+.env

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lightrag-prod
+  labels:
+    name: lightrag-prod
+    app: lightrag

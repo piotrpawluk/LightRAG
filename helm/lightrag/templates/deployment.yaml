@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lightrag.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lightrag.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "lightrag.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lightrag.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: lightrag
+        image: {{ include "lightrag.image" . }}
+        {{- if .Values.image.platform }}
+        # Platform specification for multi-arch images
+        # Note: This is a non-standard field, may not work in all Kubernetes versions
+        {{- end }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.config.server.port }}
+          name: http
+          protocol: TCP
+
+        # Environment from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: {{ include "lightrag.fullname" . }}-config
+
+        # Sensitive environment from Secret
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "lightrag.fullname" . }}-secrets
+              key: redis-password
+        - name: LLM_BINDING_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "lightrag.fullname" . }}-secrets
+              key: llm-api-key
+        - name: EMBEDDING_BINDING_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "lightrag.fullname" . }}-secrets
+              key: embedding-api-key
+        # Build REDIS_URI from components
+        - name: REDIS_URI
+          value: "redis://$(REDIS_USERNAME):$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)"
+
+        # Health checks
+        {{- with .Values.livenessProbe }}
+        livenessProbe:
+          httpGet:
+            path: {{ .path }}
+            port: {{ .port | default 9621 }}
+          initialDelaySeconds: {{ .initialDelaySeconds }}
+          periodSeconds: {{ .periodSeconds }}
+          timeoutSeconds: {{ .timeoutSeconds }}
+          failureThreshold: {{ .failureThreshold }}
+        {{- end }}
+
+        {{- with .Values.readinessProbe }}
+        readinessProbe:
+          httpGet:
+            path: {{ .path }}
+            port: {{ .port | default 9621 }}
+          initialDelaySeconds: {{ .initialDelaySeconds }}
+          periodSeconds: {{ .periodSeconds }}
+          timeoutSeconds: {{ .timeoutSeconds }}
+          failureThreshold: {{ .failureThreshold }}
+        {{- end }}
+
+        # Resource limits
+        {{- with .Values.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}

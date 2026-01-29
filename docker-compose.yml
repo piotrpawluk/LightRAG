@@ -19,3 +19,35 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Uncomment below to use Redis Stack for KV, DocStatus, and Vector storage
+    # depends_on:
+    #   redis-stack:
+    #     condition: service_healthy
+    # environment:
+    #   - REDIS_URI=redis://redis-stack:6379
+    #   - LIGHTRAG_KV_STORAGE=RedisKVStorage
+    #   - LIGHTRAG_DOC_STATUS_STORAGE=RedisDocStatusStorage
+    #   - LIGHTRAG_VECTOR_STORAGE=RedisVectorStorage
+
+  # Redis Stack with RediSearch module for Vector Storage
+  # Uncomment this service to enable Redis-based storage
+  # redis-stack:
+  #   image: redis/redis-stack:7.4.0-v3
+  #   container_name: redis-stack
+  #   ports:
+  #     - "${REDIS_PORT:-6379}:6379"
+  #     - "${REDIS_INSIGHT_PORT:-8001}:8001"  # RedisInsight Web UI
+  #   volumes:
+  #     - redis-data:/data
+  #   environment:
+  #     - REDIS_ARGS=--appendonly yes --maxmemory 2gb --maxmemory-policy noeviction
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   restart: unless-stopped
+
+# Uncomment to enable Redis data persistence
+# volumes:
+#   redis-data:

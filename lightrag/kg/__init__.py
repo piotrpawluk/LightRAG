@@ -15,6 +15,7 @@ STORAGE_IMPLEMENTATIONS = {
             "PGGraphStorage",
             "MongoGraphStorage",
             "MemgraphStorage",
+            "RedisGraphStorage",
         ],
         "required_methods": ["upsert_node", "upsert_edge"],
     },
@@ -26,6 +27,7 @@ STORAGE_IMPLEMENTATIONS = {
             "FaissVectorDBStorage",
             "QdrantVectorDBStorage",
             "MongoVectorDBStorage",
+            "RedisVectorStorage",
             # "ChromaVectorDBStorage",
         ],
         "required_methods": ["query", "upsert"],
@@ -69,6 +71,7 @@ STORAGE_ENV_REQUIREMENTS: dict[str, list[str]] = {
         "POSTGRES_PASSWORD",
         "POSTGRES_DATABASE",
     ],
+    "RedisGraphStorage": ["REDIS_URI"],
     # Vector Storage Implementations
     "NanoVectorDBStorage": [],
     "MilvusVectorDBStorage": [
@@ -83,6 +86,7 @@ STORAGE_ENV_REQUIREMENTS: dict[str, list[str]] = {
         "MONGO_URI",
         "MONGO_DATABASE",
     ],
+    "RedisVectorStorage": ["REDIS_URI"],
     # Document Status Storage Implementations
     "JsonDocStatusStorage": [],
     "RedisDocStatusStorage": ["REDIS_URI"],
@@ -107,6 +111,8 @@ STORAGES = {
     "MongoVectorDBStorage": ".kg.mongo_impl",
     "RedisKVStorage": ".kg.redis_impl",
     "RedisDocStatusStorage": ".kg.redis_impl",
+    "RedisVectorStorage": ".kg.redis_impl",
+    "RedisGraphStorage": ".kg.redis_impl",
     "ChromaVectorDBStorage": ".kg.chroma_impl",
     "PGKVStorage": ".kg.postgres_impl",
     "PGVectorStorage": ".kg.postgres_impl",

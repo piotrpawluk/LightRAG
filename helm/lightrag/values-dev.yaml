@@ -1,0 +1,24 @@
+# Development environment overrides
+
+# Lower resources for development
+resources:
+  requests:
+    memory: "1Gi"
+    cpu: "500m"
+  limits:
+    memory: "2Gi"
+    cpu: "1000m"
+
+# Development configuration
+config:
+  server:
+    logLevel: DEBUG
+    workers: 2
+
+  # Lower quality for faster dev iterations
+  redisHnsw:
+    m: 8
+    efConstruction: 256
+
+# Development secrets (can be less secure for local testing)
+# For production, NEVER commit secrets to git!

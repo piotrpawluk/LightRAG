@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lightrag
+  namespace: lightrag-prod
+  labels:
+    app: lightrag
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lightrag
+  template:
+    metadata:
+      labels:
+        app: lightrag
+    spec:
+      containers:
+      - name: lightrag
+        image: artifactory.warta.pl/github-docker/piotrpawluk/lightrag@sha256:2072f071fe59d768df5a2e8a0ebfeffb28c412f634adda40eb892e3756b957c3
+        ports:
+        - containerPort: 9621
+          name: http
+          protocol: TCP
+
+        # Environment from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: lightrag-config
+
+        # Sensitive environment from Secret
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: lightrag-secrets
+              key: redis-password
+        - name: LLM_BINDING_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: lightrag-secrets
+              key: llm-api-key
+        - name: EMBEDDING_BINDING_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: lightrag-secrets
+              key: embedding-api-key
+        - name: REDIS_URI
+          value: "redis://$(REDIS_USERNAME):$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)"
+
+        # Volume mount for graph data
+        volumeMounts:
+        - name: data
+          mountPath: /app/data
+
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9621
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 9621
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # Resource limits
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+
+      volumes:
+      - name: data
+        emptyDir: {}

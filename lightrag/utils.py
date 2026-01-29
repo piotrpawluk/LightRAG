@@ -499,8 +499,19 @@ class EmbeddingFunc:
             if "max_token_size" in sig.parameters:
                 kwargs["max_token_size"] = self.max_token_size
 
+        # Log before API call
+        batch_size = len(args[0]) if args and isinstance(args[0], (list, tuple)) else 1
+        logger.info(f"[EMBED-API] Calling embedding function for {batch_size} items")
+        api_start = time.time()
+
         # Call the actual embedding function
         result = await self.func(*args, **kwargs)
+
+        # Log after API call
+        api_elapsed = time.time() - api_start
+        result_shape = result.shape if hasattr(result, 'shape') else (len(result),)
+        result_size = result.size if hasattr(result, 'size') else len(result)
+        logger.info(f"[EMBED-API] Returned in {api_elapsed:.2f}s, shape={result_shape}, size={result_size}")
 
         # Validate embedding dimensions using total element count
         total_elements = result.size  # Total number of elements in the numpy array
@@ -508,6 +519,10 @@ class EmbeddingFunc:
 
         # Check if total elements can be evenly divided by embedding_dim
         if total_elements % expected_dim != 0:
+            logger.error(
+                f"[EMBED-API-ERROR] Dimension mismatch: total_elements={total_elements}, "
+                f"expected_dim={expected_dim}, batch_size={batch_size}"
+            )
             raise ValueError(
                 f"Embedding dimension mismatch detected: "
                 f"total elements ({total_elements}) cannot be evenly divided by "
@@ -704,6 +719,10 @@ def priority_limit_async_func_call(
                                 asyncio.get_event_loop().time()
                             )
 
+                        # Log task pickup from queue
+                        queue_size = queue.qsize() if hasattr(queue, 'qsize') else 'N/A'
+                        logger.info(f"{queue_name}: [WORKER] Picked task {task_id}, queue_size={queue_size}")
+
                         # Check if task was cancelled before worker started
                         if (
                             task_state.cancellation_requested
@@ -715,6 +734,11 @@ def priority_limit_async_func_call(
                             continue
 
                         try:
+                            # Log before function execution
+                            batch_info = f"batch_size={len(args[0])}" if args and isinstance(args[0], (list, tuple)) else "single_item"
+                            logger.info(f"{queue_name}: [WORKER] Executing task {task_id}, {batch_info}")
+                            exec_start = time.time()
+
                             # Execute function with timeout protection
                             if max_execution_timeout is not None:
                                 result = await asyncio.wait_for(
@@ -723,14 +747,20 @@ def priority_limit_async_func_call(
                             else:
                                 result = await func(*args, **kwargs)
 
+                            # Log successful execution
+                            exec_elapsed = time.time() - exec_start
+                            logger.info(f"{queue_name}: [WORKER] Task {task_id} completed in {exec_elapsed:.2f}s")
+
                             # Set result if future is still valid
                             if not task_state.future.done():
                                 task_state.future.set_result(result)
 
                         except asyncio.TimeoutError:
                             # Worker-level timeout (max_execution_timeout exceeded)
+                            queue_size = queue.qsize() if hasattr(queue, 'qsize') else 'N/A'
                             logger.warning(
-                                f"{queue_name}: Worker timeout for task {task_id} after {max_execution_timeout}s"
+                                f"{queue_name}: [WORKER-TIMEOUT] Task {task_id} timed out after {max_execution_timeout}s, "
+                                f"queue_size={queue_size}"
                             )
                             if not task_state.future.done():
                                 task_state.future.set_exception(
@@ -770,11 +800,28 @@ def priority_limit_async_func_call(
         async def enhanced_health_check():
             """Enhanced health check with stuck task detection and recovery"""
             nonlocal initialized
+            last_progress_log = asyncio.get_event_loop().time()
             try:
                 while not shutdown_event.is_set():
                     await asyncio.sleep(5)  # Check every 5 seconds
 
                     current_time = asyncio.get_event_loop().time()
+
+                    # Log periodic progress every 30 seconds
+                    if current_time - last_progress_log > 30:
+                        async with task_states_lock:
+                            active_tasks = [
+                                (tid, state) for tid, state in task_states.items()
+                                if state.worker_started and not state.future.done()
+                            ]
+                            if active_tasks:
+                                oldest_age = max(current_time - state.execution_start_time for _, state in active_tasks if state.execution_start_time is not None)
+                                queue_size = queue.qsize() if hasattr(queue, 'qsize') else 'N/A'
+                                logger.info(
+                                    f"{queue_name}: [HEALTH] {len(active_tasks)} active tasks, "
+                                    f"oldest running for {oldest_age:.1f}s, queue_size={queue_size}"
+                                )
+                        last_progress_log = current_time
 
                     # Detect and handle stuck tasks based on execution start time
                     if max_task_duration is not None:

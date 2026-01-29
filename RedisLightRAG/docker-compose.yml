@@ -1,0 +1,150 @@
+version: '3.8'
+
+services:
+  # Redis Stack - provides vector search capabilities
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: lightrag-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    environment:
+      - REDIS_ARGS=--save 900 1 --save 300 10 --save 60 1000 --maxmemory 4gb --maxmemory-policy noeviction
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Ollama - serves Qwen 3 models for LLM and embeddings
+  ollama:
+    image: ollama/ollama:latest
+    container_name: lightrag-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    # Uncomment below for GPU support (NVIDIA)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Model downloader - pulls Qwen models on startup
+  ollama-setup:
+    image: ollama/ollama:latest
+    container_name: lightrag-ollama-setup
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama-data:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Ollama service to be ready..."
+        sleep 10
+        echo "Pulling Qwen 2 LLM model (1.5B - Fast)..."
+        ollama pull qwen2:1.5b
+        echo "Pulling All-MiniLM Embedding model (Smallest & Fastest)..."
+        ollama pull all-minilm
+        echo "Models downloaded successfully!"
+    restart: "no"
+
+  # LightRAG server
+  lightrag:
+    image: ghcr.io/hkuds/lightrag:latest
+    container_name: lightrag-server
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      ollama-setup:
+        condition: service_completed_successfully
+    ports:
+      - "9621:9621"
+    volumes:
+      - lightrag-data:/app/data
+      - ./lightrag_config:/app/config
+    environment:
+      # Server Configuration
+      - HOST=0.0.0.0
+      - PORT=9621
+      - WORKERS=4
+      - LOG_LEVEL=INFO
+      
+      # Workspace
+      - WORKSPACE=default
+      
+      # LLM Configuration - Ollama with Qwen 2 (1.5B - Smallest & Fast)
+      - LLM_BINDING=ollama
+      - LLM_BINDING_HOST=http://lightrag-ollama:11434
+      - LLM_MODEL=qwen2:1.5b
+      - LLM_MAX_TOKENS=4096
+      - LLM_TEMPERATURE=0.0
+      - LLM_TIMEOUT=600
+
+      # Embedding Configuration - Ollama with All-MiniLM (Smallest & Fastest)
+      - EMBEDDING_BINDING=ollama
+      - EMBEDDING_BINDING_HOST=http://lightrag-ollama:11434
+      - EMBEDDING_MODEL=all-minilm
+      - EMBEDDING_DIM=384
+      - EMBEDDING_MAX_TOKEN_SIZE=8192
+      
+      # Storage Configuration
+      # Redis Connection URI
+      - REDIS_URI=redis://lightrag-redis:6379
+
+      # KV Storage - using Redis
+      - LIGHTRAG_KV_STORAGE=RedisKVStorage
+      - REDIS_KV_DB=0
+
+      # Document Status Storage - using Redis
+      - LIGHTRAG_DOC_STATUS_STORAGE=RedisDocStatusStorage
+      - REDIS_DOC_STATUS_DB=1
+      
+      # Vector Storage - using NanoVectorDB (default, in-memory)
+      # For Redis vector storage, uncomment below:
+      # - LIGHTRAG_VECTOR_STORAGE=RedisVectorStorage
+      # - REDIS_VECTOR_URL=redis://redis:6379
+      # - REDIS_VECTOR_DB=2
+      
+      # Graph Storage - using NetworkX (default, file-based)
+      - LIGHTRAG_GRAPH_STORAGE=NetworkXStorage
+      
+      # Optional: Enable if you want to use Redis for all storage including vectors
+      # - LIGHTRAG_VECTOR_STORAGE=RedisVectorStorage
+      
+      # Working directory
+      - WORKING_DIR=/app/data
+      
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9621/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis-data:
+    driver: local
+  ollama-data:
+    driver: local
+  lightrag-data:
+    driver: local
+
+networks:
+  default:
+    name: lightrag-network

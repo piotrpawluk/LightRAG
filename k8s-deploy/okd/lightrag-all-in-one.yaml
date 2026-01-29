@@ -1,0 +1,190 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: lightrag-secrets
+  namespace: pp
+type: Opaque
+stringData:
+  redis-password: "U6q7jeA9leOIwYMhAwZkPWRHw4SDmTGBMZXJXcsHlHW7oQUY"
+  llm-api-key: "iAsmiqkLkU4e9fFf"
+  embedding-api-key: "pU68nMPXhWgXjnIQ"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lightrag-config
+  namespace: pp
+data:
+  # Server Configuration
+  HOST: "0.0.0.0"
+  PORT: "9621"
+  WORKERS: "4"
+  LOG_LEVEL: "INFO"
+  WORKSPACE: "redis_qwen3_workspace"
+
+  # LLM Configuration
+  LLM_BINDING: "openai"
+  LLM_BINDING_HOST: "https://ml-llm-v-srv-v45-cp1-tst-node1.ai.warta.pl/v1"
+  LLM_MODEL: "Qwen/Qwen3-Next-80B-A3B-Thinking"
+  LLM_MAX_TOKENS: "4096"
+  LLM_TEMPERATURE: "0.0"
+  LLM_TOP_P: "0.9"
+  LLM_TIMEOUT: "900"
+
+  # Embedding Configuration
+  EMBEDDING_BINDING: "openai"
+  EMBEDDING_BINDING_HOST: "https://ml-ssm-l-srv-v16-cp2-tst-node5-llm-apps-tst.apps.ml.warta.pl/v1"
+  EMBEDDING_MODEL: "Qwen3-Embedding-8B"
+  EMBEDDING_DIM: "4096"
+  EMBEDDING_MAX_TOKEN_SIZE: "8192"
+
+  # Redis Configuration
+  REDIS_USERNAME: "user2"
+  REDIS_HOST: "ml-redisearch-vector-db-node5.shared-dev.svc.cluster.local"
+  REDIS_PORT: "80"
+
+  # Storage Configuration
+  LIGHTRAG_KV_STORAGE: "RedisKVStorage"
+  REDIS_KV_DB: "0"
+  LIGHTRAG_DOC_STATUS_STORAGE: "RedisDocStatusStorage"
+  REDIS_DOC_STATUS_DB: "1"
+  LIGHTRAG_VECTOR_STORAGE: "RedisVectorStorage"
+  REDIS_VECTOR_DB: "2"
+  LIGHTRAG_GRAPH_STORAGE: "RedisGraphStorage"
+
+  # Redis HNSW Configuration
+  REDIS_HNSW_M: "16"
+  REDIS_HNSW_EF_CONSTRUCTION: "512"
+  REDIS_MAX_CONNECTIONS: "100"
+  REDIS_SOCKET_TIMEOUT: "30"
+  REDIS_CONNECT_TIMEOUT: "10"
+  REDIS_RETRY_ATTEMPTS: "3"
+
+  # Working Directory
+  WORKING_DIR: "/app/data"
+
+  # Query Configuration
+  DEFAULT_QUERY_MODE: "hybrid"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lightrag
+  namespace: pp
+  labels:
+    app: lightrag
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lightrag
+  template:
+    metadata:
+      labels:
+        app: lightrag
+    spec:
+      containers:
+      - name: lightrag
+        image: artifactory.warta.pl/github-docker/piotrpawluk/lightrag@sha256:2b57d091de54e5d9b4c43f3531ce95fb6d18b9b97bbcbc5c81bd5cca7008f257
+        ports:
+        - containerPort: 9621
+          name: http
+          protocol: TCP
+
+        # Environment from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: lightrag-config
+
+        # Sensitive environment from Secret
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: lightrag-secrets
+              key: redis-password
+        - name: LLM_BINDING_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: lightrag-secrets
+              key: llm-api-key
+        - name: EMBEDDING_BINDING_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: lightrag-secrets
+              key: embedding-api-key
+        - name: REDIS_URI
+          value: "redis://$(REDIS_USERNAME):$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)"
+
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9621
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 9621
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # Resource limits
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+
+        # Volume mount for ephemeral data
+        volumeMounts:
+        - name: data
+          mountPath: /app/data
+
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lightrag
+  namespace: pp
+  labels:
+    app: lightrag
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9621
+    targetPort: 9621
+    protocol: TCP
+    name: http
+  selector:
+    app: lightrag
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: lightrag
+  namespace: pp
+  labels:
+    app: lightrag
+spec:
+  to:
+    kind: Service
+    name: lightrag
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

@@ -1,0 +1,166 @@
+version: '3.8'
+
+# LightRAG with Full Redis Storage + External Qwen3 APIs
+# Services: Redis Stack + LightRAG (no local models)
+#
+# This configuration provides:
+# - Redis Stack with RediSearch for vector similarity search (HNSW)
+# - RedisKVStorage for documents and chunks (DB 0)
+# - RedisDocStatusStorage for processing status (DB 1)
+# - RedisVectorStorage for embeddings with HNSW indexing (DB 2)
+# - NetworkXStorage for knowledge graph (file-based, persisted in lightrag-data volume)
+#
+# LLM: Qwen3-Next-80B-A3B-Thinking (80B parameters, thinking mode) - External API
+# Embedding: Qwen3-Embedding-8B (4096 dimensions) - External API
+# Image: ghcr.io/peterpawluk/lightrag:latest
+
+services:
+  # Redis Stack - provides vector search capabilities via RediSearch module
+  redis-stack:
+    image: redis/redis-stack-server:latest
+    container_name: lightrag-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      # Increased memory for 4096-dim vectors (8GB recommended for production)
+      - REDIS_ARGS=--appendonly yes --maxmemory 8gb --maxmemory-policy noeviction
+
+  # LightRAG server with full Redis storage + external Qwen3 APIs
+  lightrag:
+    image: ghcr.io/piotrpawluk/lightrag:latest
+    platform: linux/amd64
+    container_name: lightrag-server
+    depends_on:
+      redis-stack:
+        condition: service_healthy
+    ports:
+      - "9621:9621"
+    volumes:
+      - lightrag-data:/app/data
+      - ./lightrag_config:/app/config
+    environment:
+      # ============================================
+      # Server Configuration
+      # ============================================
+      - HOST=0.0.0.0
+      - PORT=9621
+      - WORKERS=4
+      - LOG_LEVEL=INFO
+
+      # ============================================
+      # Workspace
+      # ============================================
+      - WORKSPACE=redis_qwen3_workspace
+
+      # ============================================
+      # LLM Configuration - Qwen3-Next-80B-A3B-Thinking (External API)
+      # 80B parameter model with thinking mode via OpenAI-compatible API
+      # ============================================
+      - LLM_BINDING=openai
+      - LLM_BINDING_HOST=https://ml-llm-v-srv-v45-cp1-tst-node1.ai.warta.pl/v1
+      - LLM_BINDING_API_KEY=iAsmiqkLkU4e9fFf
+      - LLM_MODEL=Qwen/Qwen3-Next-80B-A3B-Thinking
+      - LLM_MAX_TOKENS=4096
+      - LLM_TEMPERATURE=0.0
+      - LLM_TOP_P=0.9
+      - LLM_TIMEOUT=900
+
+      # ============================================
+      # Embedding Configuration - Qwen3-Embedding-8B (External API)
+      # 4096-dimensional embeddings via OpenAI-compatible API
+      # ============================================
+      - EMBEDDING_BINDING=openai
+      - EMBEDDING_BINDING_HOST=https://ml-ssm-l-srv-v16-cp2-tst-node5-llm-apps-tst.apps.ml.warta.pl/v1
+      - EMBEDDING_BINDING_API_KEY=pU68nMPXhWgXjnIQ
+      - EMBEDDING_MODEL=Qwen3-Embedding-8B
+      - EMBEDDING_DIM=4096
+      - EMBEDDING_MAX_TOKEN_SIZE=8192
+
+      # ============================================
+      # Storage Configuration - FULL REDIS + NetworkX
+      # ============================================
+
+      # Redis Connection URI
+      - REDIS_URI=redis://lightrag-redis:6379
+
+      # KV Storage - Redis (DB 0)
+      # Stores documents, text chunks, and LLM response cache
+      - LIGHTRAG_KV_STORAGE=RedisKVStorage
+      - REDIS_KV_DB=0
+
+      # Document Status Storage - Redis (DB 1)
+      # Tracks document processing status and metadata
+      - LIGHTRAG_DOC_STATUS_STORAGE=RedisDocStatusStorage
+      - REDIS_DOC_STATUS_DB=1
+
+      # Vector Storage - Redis (DB 2) with RediSearch
+      # Stores 4096-dimensional embeddings with HNSW indexing for fast similarity search
+      - LIGHTRAG_VECTOR_STORAGE=RedisVectorStorage
+      - REDIS_VECTOR_DB=2
+
+      # Graph Storage - NetworkX (file-based)
+      # Stores entity-relationship knowledge graph
+      # Note: RedisGraph module was deprecated in Redis Stack 7.2+
+      - LIGHTRAG_GRAPH_STORAGE=NetworkXStorage
+
+      # ============================================
+      # Redis HNSW Vector Index Configuration
+      # Optimized for 4096-dimensional embeddings
+      # ============================================
+      # M: Number of connections per node in HNSW graph
+      # Higher values = better recall, more memory, slower indexing
+      # Recommended: 16 (default), 32 (high precision), 8 (low memory)
+      - REDIS_HNSW_M=16
+
+      # EF_CONSTRUCTION: Search depth during index construction
+      # Higher values = better index quality, slower indexing
+      # Increased to 512 for better quality with 4096-dim vectors
+      - REDIS_HNSW_EF_CONSTRUCTION=512
+
+      # ============================================
+      # Redis Connection Settings
+      # ============================================
+      - REDIS_MAX_CONNECTIONS=100
+      - REDIS_SOCKET_TIMEOUT=30
+      - REDIS_CONNECT_TIMEOUT=10
+      - REDIS_RETRY_ATTEMPTS=3
+
+      # ============================================
+      # Working Directory
+      # ============================================
+      - WORKING_DIR=/app/data
+
+      # ============================================
+      # Query Configuration
+      # ============================================
+      - DEFAULT_QUERY_MODE=hybrid
+
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9621/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  # Redis data persistence (RDB snapshots + AOF logs)
+  # Increased size needed for 4096-dim vectors
+  redis-data:
+    driver: local
+  # LightRAG data (NetworkX graph files, processed documents)
+  lightrag-data:
+    driver: local
+
+networks:
+  default:
+    name: lightrag-network

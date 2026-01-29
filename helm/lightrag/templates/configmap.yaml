@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lightrag.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lightrag.labels" . | nindent 4 }}
+data:
+  # Server Configuration
+  HOST: {{ .Values.config.server.host | quote }}
+  PORT: {{ .Values.config.server.port | quote }}
+  WORKERS: {{ .Values.config.server.workers | quote }}
+  LOG_LEVEL: {{ .Values.config.server.logLevel | quote }}
+  WORKSPACE: {{ .Values.config.server.workspace | quote }}
+
+  # LLM Configuration
+  LLM_BINDING: {{ .Values.config.llm.binding | quote }}
+  LLM_BINDING_HOST: {{ .Values.config.llm.host | quote }}
+  LLM_MODEL: {{ .Values.config.llm.model | quote }}
+  LLM_MAX_TOKENS: {{ .Values.config.llm.maxTokens | quote }}
+  LLM_TEMPERATURE: {{ .Values.config.llm.temperature | quote }}
+  LLM_TOP_P: {{ .Values.config.llm.topP | quote }}
+  LLM_TIMEOUT: {{ .Values.config.llm.timeout | quote }}
+
+  # Embedding Configuration
+  EMBEDDING_BINDING: {{ .Values.config.embedding.binding | quote }}
+  EMBEDDING_BINDING_HOST: {{ .Values.config.embedding.host | quote }}
+  EMBEDDING_MODEL: {{ .Values.config.embedding.model | quote }}
+  EMBEDDING_DIM: {{ .Values.config.embedding.dimension | quote }}
+  EMBEDDING_MAX_TOKEN_SIZE: {{ .Values.config.embedding.maxTokenSize | quote }}
+
+  # Redis Configuration
+  REDIS_USERNAME: {{ .Values.config.redis.username | quote }}
+  REDIS_HOST: {{ .Values.config.redis.host | quote }}
+  REDIS_PORT: {{ .Values.config.redis.port | quote }}
+
+  # Storage Configuration
+  LIGHTRAG_KV_STORAGE: {{ .Values.config.storage.kv | quote }}
+  REDIS_KV_DB: {{ .Values.config.storage.kvDb | quote }}
+  LIGHTRAG_DOC_STATUS_STORAGE: {{ .Values.config.storage.docStatus | quote }}
+  REDIS_DOC_STATUS_DB: {{ .Values.config.storage.docStatusDb | quote }}
+  LIGHTRAG_VECTOR_STORAGE: {{ .Values.config.storage.vector | quote }}
+  REDIS_VECTOR_DB: {{ .Values.config.storage.vectorDb | quote }}
+  LIGHTRAG_GRAPH_STORAGE: {{ .Values.config.storage.graph | quote }}
+
+  # Redis HNSW Configuration
+  REDIS_HNSW_M: {{ .Values.config.redisHnsw.m | quote }}
+  REDIS_HNSW_EF_CONSTRUCTION: {{ .Values.config.redisHnsw.efConstruction | quote }}
+  REDIS_MAX_CONNECTIONS: {{ .Values.config.redisHnsw.maxConnections | quote }}
+  REDIS_SOCKET_TIMEOUT: {{ .Values.config.redisHnsw.socketTimeout | quote }}
+  REDIS_CONNECT_TIMEOUT: {{ .Values.config.redisHnsw.connectTimeout | quote }}
+  REDIS_RETRY_ATTEMPTS: {{ .Values.config.redisHnsw.retryAttempts | quote }}
+
+  # Working Directory
+  WORKING_DIR: {{ .Values.config.server.workingDir | quote }}
+
+  # Query Configuration
+  DEFAULT_QUERY_MODE: {{ .Values.config.query.defaultMode | quote }}

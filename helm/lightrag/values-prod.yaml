@@ -1,0 +1,45 @@
+# Production environment overrides
+
+# Multi-replica for high availability
+# Requires RedisGraphStorage (file-based NetworkX doesn't support multi-replica)
+replicaCount: 2
+
+# Higher resources for production workloads
+resources:
+  requests:
+    memory: "4Gi"
+    cpu: "2000m"
+  limits:
+    memory: "8Gi"
+    cpu: "4000m"
+
+# Production configuration
+config:
+  server:
+    logLevel: INFO
+    workers: 8
+
+  # Higher quality for production
+  redisHnsw:
+    m: 32
+    efConstruction: 1024
+
+# Production secrets
+# WARNING: DO NOT commit this file with real secrets!
+# Use one of these approaches instead:
+# 1. Separate values-prod-secrets.yaml file (not in git)
+# 2. External Secrets Operator
+# 3. Sealed Secrets
+# 4. Vault integration
+# 5. helm install with --set flags
+
+# Example with external secrets:
+# secrets:
+#   useExternalSecrets: true
+#   externalSecretStore: vault-backend
+
+# Or keep secrets empty and provide via --set:
+# helm install lightrag ./helm/lightrag -n pp \
+#   --set secrets.redisPassword=$REDIS_PASSWORD \
+#   --set secrets.llmApiKey=$LLM_API_KEY \
+#   --set secrets.embeddingApiKey=$EMBEDDING_API_KEY

@@ -1,0 +1,49 @@
+# PostgreSQL 16 with PGVector and Apache AGE Extensions
+# Custom build for LightRAG with full PostgreSQL storage
+
+FROM postgres:16-bookworm
+
+# Add Debian backports for golang-1.22
+RUN echo "deb http://deb.debian.org/debian bookworm-backports main" > /etc/apt/sources.list.d/backports.list
+
+# Install build dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    build-essential \
+    git \
+    golang-1.22-go \
+    flex \
+    bison \
+    postgresql-server-dev-16 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Build and install pgvector extension (v0.8.0+ supports 16,000 dimensions)
+RUN git clone --branch v0.8.0 https://github.com/pgvector/pgvector.git /tmp/pgvector && \
+    cd /tmp/pgvector && \
+    make && \
+    make install && \
+    rm -rf /tmp/pgvector
+
+# Build and install Apache AGE extension
+RUN git clone https://github.com/apache/age.git /tmp/age && \
+    cd /tmp/age && \
+    make PG_CONFIG=/usr/bin/pg_config && \
+    make install PG_CONFIG=/usr/bin/pg_config && \
+    rm -rf /tmp/age
+
+# Copy initialization scripts
+COPY init-extensions.sql /docker-entrypoint-initdb.d/01-init-extensions.sql
+COPY init-age.sh /docker-entrypoint-initdb.d/02-init-age.sh
+
+# Make init script executable
+RUN chmod +x /docker-entrypoint-initdb.d/02-init-age.sh
+
+# Clean up
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Label the image
+LABEL org.opencontainers.image.title="PostgreSQL with PGVector and Apache AGE"
+LABEL org.opencontainers.image.description="PostgreSQL 16 with pgvector and Apache AGE extensions for LightRAG"
+LABEL org.opencontainers.image.version="16-pgvector-age"

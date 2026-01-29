@@ -1,0 +1,17 @@
+# LightRAG with Patched OpenAI Client for Internal API Compatibility
+# Fixes: AttributeError: 'list' object has no attribute 'data'
+
+FROM ghcr.io/hkuds/lightrag:latest
+
+# Downgrade OpenAI client to a more compatible version
+# Version 1.109.1 has strict parsing that fails with some OpenAI-compatible APIs
+# Version 1.35.0 is known to be stable and compatible
+RUN /app/.venv/bin/pip install --upgrade openai==1.35.0
+
+# Verify the installation
+RUN /app/.venv/bin/python -m pip show openai
+
+# Label the image
+LABEL org.opencontainers.image.title="LightRAG with Patched OpenAI Client"
+LABEL org.opencontainers.image.description="LightRAG with OpenAI client v1.35.0 for internal API compatibility"
+LABEL org.opencontainers.image.version="latest-openai-1.35.0"

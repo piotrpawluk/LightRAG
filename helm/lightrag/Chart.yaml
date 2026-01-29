@@ -1,0 +1,22 @@
+apiVersion: v2
+name: lightrag
+description: LightRAG - Simple and Fast Retrieval-Augmented Generation with Redis Stack storage and external Qwen3 APIs
+type: application
+version: 1.0.0
+appVersion: "latest"
+keywords:
+  - rag
+  - retrieval-augmented-generation
+  - knowledge-graph
+  - redis
+  - vector-search
+  - ai
+  - nlp
+maintainers:
+  - name: piotrpawluk
+    email: piotr.pawluk@example.com
+sources:
+  - https://github.com/HKUDS/LightRAG
+  - https://github.com/piotrpawluk/lightrag
+home: https://github.com/HKUDS/LightRAG
+icon: https://raw.githubusercontent.com/HKUDS/LightRAG/main/assets/logo.svg

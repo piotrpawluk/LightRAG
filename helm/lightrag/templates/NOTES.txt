@@ -1,0 +1,81 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your release is named {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+=============================================================================
+  LightRAG - Retrieval-Augmented Generation with Knowledge Graphs
+=============================================================================
+
+To access your LightRAG deployment:
+
+1. Get the route URL:
+
+   {{- if .Values.route.enabled }}
+   export ROUTE_URL=$(oc get route {{ include "lightrag.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.spec.host}')
+   echo "LightRAG API: https://$ROUTE_URL"
+   {{- else }}
+   # Route is disabled. Access via port-forward:
+   kubectl port-forward svc/{{ include "lightrag.fullname" . }} 9621:9621 -n {{ .Release.Namespace }}
+   export ROUTE_URL="localhost:9621"
+   {{- end }}
+
+2. Test the health endpoint:
+
+   curl https://$ROUTE_URL/health
+
+3. Insert a document:
+
+   curl -X POST https://$ROUTE_URL/insert \
+     -H 'Content-Type: application/json' \
+     -d '{"text": "Your document content here"}'
+
+4. Query with different modes:
+
+   # Hybrid mode (recommended)
+   curl -X POST https://$ROUTE_URL/query \
+     -H 'Content-Type: application/json' \
+     -d '{"query": "Your question", "mode": "hybrid", "top_k": 10}'
+
+   # Mix mode (combines KG + vector)
+   curl -X POST https://$ROUTE_URL/query \
+     -H 'Content-Type: application/json' \
+     -d '{"query": "Your question", "mode": "mix", "top_k": 10}'
+
+=============================================================================
+  Storage Configuration
+=============================================================================
+
+KV Storage:       {{ .Values.config.storage.kv }} (Redis DB {{ .Values.config.storage.kvDb }})
+Vector Storage:   {{ .Values.config.storage.vector }} (Redis DB {{ .Values.config.storage.vectorDb }})
+Graph Storage:    {{ .Values.config.storage.graph }} (Redis-based, no PVC needed!)
+DocStatus:        {{ .Values.config.storage.docStatus }} (Redis DB {{ .Values.config.storage.docStatusDb }})
+
+External Dependencies:
+- Redis:    {{ .Values.config.redis.host }}:{{ .Values.config.redis.port }}
+- LLM API:  {{ .Values.config.llm.model }} ({{ .Values.config.llm.host }})
+- Embedding: {{ .Values.config.embedding.model }} ({{ .Values.config.embedding.dimension }} dims)
+
+=============================================================================
+  Useful Commands
+=============================================================================
+
+# View logs
+oc logs -f deployment/{{ include "lightrag.fullname" . }} -n {{ .Release.Namespace }}
+
+# Check pod status
+oc get pods -l app.kubernetes.io/name={{ include "lightrag.name" . }} -n {{ .Release.Namespace }}
+
+# Describe deployment
+oc describe deployment {{ include "lightrag.fullname" . }} -n {{ .Release.Namespace }}
+
+# Upgrade the deployment
+helm upgrade {{ .Release.Name }} ./helm/lightrag -n {{ .Release.Namespace }}
+
+# Rollback if needed
+helm rollback {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+=============================================================================
+
+For more information:
+- LightRAG Documentation: https://github.com/HKUDS/LightRAG
+- Helm Chart: helm show all ./helm/lightrag

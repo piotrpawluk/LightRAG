@@ -1,0 +1,164 @@
+version: '3.8'
+
+# LightRAG with Full PostgreSQL Storage (PGVector + AGE)
+# All storage in PostgreSQL: KV, Vectors, Graph, Document Status
+
+services:
+  # PostgreSQL with PGVector and AGE extensions (Public Image)
+  postgres:
+    image: ghcr.io/piotrpawluk/postgres-pgvector-age:latest
+    container_name: lightrag-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_USER=lightrag
+      - POSTGRES_PASSWORD=lightrag_secure_password
+      - POSTGRES_DB=lightrag
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lightrag"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Ollama - serves Qwen 2 LLM and All-MiniLM embeddings
+  ollama:
+    image: ollama/ollama:latest
+    container_name: lightrag-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Model downloader - pulls Qwen 2 and All-MiniLM models
+  ollama-setup:
+    image: ollama/ollama:latest
+    container_name: lightrag-ollama-setup
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama-data:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Ollama service to be ready..."
+        sleep 10
+        echo "Pulling Qwen 2 LLM model (7B - Better Quality)..."
+        ollama pull qwen2:7b
+        echo "Pulling All-MiniLM Embedding model (Smallest & Fastest)..."
+        ollama pull all-minilm
+        echo "All models downloaded successfully!"
+        echo "Model list:"
+        ollama list
+    restart: "no"
+
+  # LightRAG server with full PostgreSQL storage
+  lightrag:
+    image: ghcr.io/hkuds/lightrag:latest
+    container_name: lightrag-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      ollama-setup:
+        condition: service_completed_successfully
+    ports:
+      - "9621:9621"
+    volumes:
+      - lightrag-data:/app/data
+      - ./lightrag_config:/app/config
+    environment:
+      # ============================================
+      # Server Configuration
+      # ============================================
+      - HOST=0.0.0.0
+      - PORT=9621
+      - WORKERS=4
+      - LOG_LEVEL=INFO
+
+      # ============================================
+      # Workspace
+      # ============================================
+      - WORKSPACE=postgres_workspace
+
+      # ============================================
+      # LLM Configuration - Qwen 2 (7B - Better Quality)
+      # ============================================
+      - LLM_BINDING=ollama
+      - LLM_BINDING_HOST=http://lightrag-ollama:11434
+      - LLM_MODEL=qwen2:7b
+      - LLM_MAX_TOKENS=4096
+      - LLM_TEMPERATURE=0.0
+      - LLM_TOP_P=0.9
+      - LLM_TIMEOUT=900
+
+      # ============================================
+      # Embedding Configuration - All-MiniLM (Smallest & Fastest)
+      # ============================================
+      - EMBEDDING_BINDING=ollama
+      - EMBEDDING_BINDING_HOST=http://lightrag-ollama:11434
+      - EMBEDDING_MODEL=all-minilm
+      - EMBEDDING_DIM=384
+      - EMBEDDING_MAX_TOKEN_SIZE=8192
+
+      # ============================================
+      # Storage Configuration - ALL POSTGRESQL
+      # ============================================
+
+      # PostgreSQL Connection
+      - POSTGRES_HOST=lightrag-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=lightrag
+      - POSTGRES_PASSWORD=lightrag_secure_password
+      - POSTGRES_DATABASE=lightrag
+
+      # KV Storage - PostgreSQL
+      - LIGHTRAG_KV_STORAGE=PGKVStorage
+
+      # Document Status Storage - PostgreSQL
+      - LIGHTRAG_DOC_STATUS_STORAGE=PGDocStatusStorage
+
+      # Vector Storage - PostgreSQL with PGVector
+      - LIGHTRAG_VECTOR_STORAGE=PGVectorStorage
+
+      # Graph Storage - PostgreSQL with Apache AGE Extension
+      - LIGHTRAG_GRAPH_STORAGE=PGGraphStorage
+
+      # ============================================
+      # Working Directory
+      # ============================================
+      - WORKING_DIR=/app/data
+
+      # ============================================
+      # Query Configuration
+      # ============================================
+      - DEFAULT_QUERY_MODE=hybrid
+
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9621/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres-data:
+    driver: local
+  ollama-data:
+    driver: local
+  lightrag-data:
+    driver: local
+
+networks:
+  default:
+    name: lightrag-network
