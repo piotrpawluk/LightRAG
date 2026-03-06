@@ -43,6 +43,19 @@ from lightrag.constants import (
     SOURCE_IDS_LIMIT_METHOD_FIFO,
 )
 
+# Lazy import to avoid circular dependency — loaded at first use
+_mf_trace = None
+
+
+def _get_mf_trace():
+    global _mf_trace
+    if _mf_trace is None:
+        from lightrag import mlflow_integration as mf
+
+        _mf_trace = mf
+    return _mf_trace
+
+
 # Precompile regex pattern for JSON sanitization (module-level, compiled once)
 _SURROGATE_PATTERN = re.compile(r"[\uD800-\uDFFF\uFFFE\uFFFF]")
 
@@ -2148,6 +2161,10 @@ async def use_llm_func_with_cache(
             logger.debug(f"Found cache for {arg_hash}")
             statistic_data["llm_cache"] += 1
 
+            _get_mf_trace().trace_llm_call(
+                cache_hit=True, prompt_hash=arg_hash, cache_type=cache_type
+            )
+
             # Add cache key to collector if provided
             if cache_keys_collector is not None:
                 cache_keys_collector.append(cache_key)
@@ -2162,11 +2179,20 @@ async def use_llm_func_with_cache(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
+        _llm_start = time.time()
         res: str = await use_llm_func(
             safe_user_prompt, system_prompt=safe_system_prompt, **kwargs
         )
+        _llm_elapsed_ms = (time.time() - _llm_start) * 1000
 
         res = remove_think_tags(res)
+
+        _get_mf_trace().trace_llm_call(
+            cache_hit=False,
+            prompt_hash=arg_hash,
+            cache_type=cache_type,
+            latency_ms=_llm_elapsed_ms,
+        )
 
         # Generate timestamp for cache miss (LLM call completion time)
         current_timestamp = int(time.time())
@@ -2196,6 +2222,7 @@ async def use_llm_func_with_cache(
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
 
+    _llm_start = time.time()
     try:
         res = await use_llm_func(
             safe_user_prompt, system_prompt=safe_system_prompt, **kwargs
@@ -2205,6 +2232,13 @@ async def use_llm_func_with_cache(
         error_msg = f"[LLM func] {str(e)}"
         # Re-raise with the same exception type but modified message
         raise type(e)(error_msg) from e
+    _llm_elapsed_ms = (time.time() - _llm_start) * 1000
+
+    _get_mf_trace().trace_llm_call(
+        cache_hit=False,
+        cache_type=cache_type,
+        latency_ms=_llm_elapsed_ms,
+    )
 
     # Generate timestamp for non-cached LLM call
     current_timestamp = int(time.time())
@@ -2861,6 +2895,44 @@ async def process_chunks_unified(
         return []
 
     origin_count = len(unique_chunks)
+
+    # 0. Pre-filter chunks before expensive reranking (algorithmic optimization)
+    # Vector search results are already sorted by similarity, so we can cap candidates
+    # to reduce reranker latency significantly (e.g., from 50+ to 25 chunks)
+    if query_param.enable_rerank and query and unique_chunks:
+        max_rerank_candidates = global_config.get("max_rerank_candidates", 0)
+        min_cosine_for_rerank = global_config.get("min_cosine_for_rerank", 0.0)
+
+        pre_filter_count = len(unique_chunks)
+
+        # Filter by cosine/distance score threshold if scores are available
+        if min_cosine_for_rerank > 0.0:
+            filtered_by_score = []
+            for chunk in unique_chunks:
+                # Check for cosine_score (from vector search) or distance field
+                score = chunk.get("cosine_score") or chunk.get("distance")
+                if score is not None:
+                    # distance field is cosine similarity (higher = better)
+                    if score >= min_cosine_for_rerank:
+                        filtered_by_score.append(chunk)
+                else:
+                    # No score available, keep the chunk
+                    filtered_by_score.append(chunk)
+
+            if len(filtered_by_score) < len(unique_chunks):
+                logger.info(
+                    f"Pre-filter by cosine threshold ({min_cosine_for_rerank}): "
+                    f"{len(unique_chunks)} -> {len(filtered_by_score)} chunks"
+                )
+                unique_chunks = filtered_by_score
+
+        # Cap candidates (vector search results already sorted by similarity)
+        if max_rerank_candidates > 0 and len(unique_chunks) > max_rerank_candidates:
+            unique_chunks = unique_chunks[:max_rerank_candidates]
+            logger.info(
+                f"Pre-filter capped rerank candidates: {pre_filter_count} -> {len(unique_chunks)} "
+                f"(max_rerank_candidates={max_rerank_candidates})"
+            )
 
     # 1. Apply reranking if enabled and query is provided
     if query_param.enable_rerank and query and unique_chunks:

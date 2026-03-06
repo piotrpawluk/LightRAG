@@ -40,11 +40,13 @@ export default function QuerySettings() {
   // Default values for reset functionality
   const defaultValues = useMemo(() => ({
     mode: 'mix' as QueryMode,
+    response_type: 'Single Paragraph',
     top_k: 40,
     chunk_top_k: 20,
     max_entity_tokens: 6000,
     max_relation_tokens: 8000,
-    max_total_tokens: 30000
+    max_total_tokens: 30000,
+    include_references: false
   }), [])
 
   const handleReset = useCallback((key: keyof typeof defaultValues) => {
@@ -148,6 +150,46 @@ export default function QuerySettings() {
                 <ResetButton
                   onClick={() => handleReset('mode')}
                   title="Reset to default (Mix)"
+                />
+              </div>
+            </>
+
+            {/* Response Type */}
+            <>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <label htmlFor="response_type_select" className="ml-1 cursor-help">
+                      {t('retrievePanel.querySettings.responseFormat')}
+                    </label>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    <p>{t('retrievePanel.querySettings.responseFormatTooltip')}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <div className="flex items-center gap-1">
+                <Select
+                  value={querySettings.response_type || 'Single Paragraph'}
+                  onValueChange={(v) => handleChange('response_type', v)}
+                >
+                  <SelectTrigger
+                    id="response_type_select"
+                    className="hover:bg-primary/5 h-9 cursor-pointer focus:ring-0 focus:ring-offset-0 focus:outline-0 active:right-0 flex-1 text-left [&>span]:break-all [&>span]:line-clamp-1"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="Single Paragraph">{t('retrievePanel.querySettings.responseFormatOptions.singleParagraph')}</SelectItem>
+                      <SelectItem value="Multiple Paragraphs">{t('retrievePanel.querySettings.responseFormatOptions.multipleParagraphs')}</SelectItem>
+                      <SelectItem value="Bullet Points">{t('retrievePanel.querySettings.responseFormatOptions.bulletPoints')}</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <ResetButton
+                  onClick={() => handleReset('response_type')}
+                  title="Reset to default (Single Paragraph)"
                 />
               </div>
             </>
@@ -372,6 +414,27 @@ export default function QuerySettings() {
                   id="enable_rerank"
                   checked={querySettings.enable_rerank}
                   onCheckedChange={(checked) => handleChange('enable_rerank', checked)}
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <label htmlFor="include_references" className="flex-1 ml-1 cursor-help">
+                        {t('retrievePanel.querySettings.includeReferences')}
+                      </label>
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      <p>{t('retrievePanel.querySettings.includeReferencesTooltip')}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <Checkbox
+                  className="mr-10 cursor-pointer"
+                  id="include_references"
+                  checked={querySettings.include_references ?? false}
+                  onCheckedChange={(checked) => handleChange('include_references', checked)}
                 />
               </div>
 

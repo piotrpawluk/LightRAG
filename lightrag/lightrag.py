@@ -38,6 +38,8 @@ from lightrag.constants import (
     DEFAULT_RELATED_CHUNK_NUMBER,
     DEFAULT_KG_CHUNK_PICK_METHOD,
     DEFAULT_MIN_RERANK_SCORE,
+    DEFAULT_MAX_RERANK_CANDIDATES,
+    DEFAULT_MIN_COSINE_FOR_RERANK,
     DEFAULT_SUMMARY_MAX_TOKENS,
     DEFAULT_SUMMARY_CONTEXT_SIZE,
     DEFAULT_SUMMARY_LENGTH_RECOMMENDED,
@@ -113,6 +115,7 @@ from lightrag.utils import (
     normalize_source_ids_limit_method,
 )
 from lightrag.types import KnowledgeGraph
+from lightrag import mlflow_integration as mf_trace
 from dotenv import load_dotenv
 
 # use the .env that is inside the current folder
@@ -123,6 +126,12 @@ load_dotenv(dotenv_path=".env", override=False)
 # TODO: TO REMOVE @Yannick
 config = configparser.ConfigParser()
 config.read("config.ini", "utf-8")
+
+
+def _log_timing(operation_name: str, elapsed_ms: float) -> None:
+    """Log timing with timestamp for performance analysis."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    logger.info(f"[TIMING] [{timestamp}] {operation_name}: {elapsed_ms:.2f}ms")
 
 
 @final
@@ -313,6 +322,9 @@ class LightRAG:
     llm_model_func: Callable[..., object] | None = field(default=None)
     """Function for interacting with the large language model (LLM). Must be set before use."""
 
+    keyword_llm_func: Callable[..., object] | None = field(default=None)
+    """Optional dedicated function for keyword extraction. Use a smaller/faster model (e.g., 7B) for reduced latency. If not set, falls back to llm_model_func."""
+
     llm_model_name: str = field(default="gpt-4o-mini")
     """Name of the LLM model used for generating responses."""
 
@@ -355,6 +367,20 @@ class LightRAG:
         default=get_env_value("MIN_RERANK_SCORE", DEFAULT_MIN_RERANK_SCORE, float)
     )
     """Minimum rerank score threshold for filtering chunks after reranking."""
+
+    max_rerank_candidates: int = field(
+        default=get_env_value(
+            "MAX_RERANK_CANDIDATES", DEFAULT_MAX_RERANK_CANDIDATES, int
+        )
+    )
+    """Maximum number of chunks to send to reranker. Set to 0 to disable (unlimited). Reduces rerank latency by pre-filtering."""
+
+    min_cosine_for_rerank: float = field(
+        default=get_env_value(
+            "MIN_COSINE_FOR_RERANK", DEFAULT_MIN_COSINE_FOR_RERANK, float
+        )
+    )
+    """Minimum cosine similarity score to consider for reranking. Set to 0.0 to disable. Pre-filters low-relevance chunks."""
 
     # Storage
     # ---
@@ -1175,10 +1201,14 @@ class LightRAG:
         if track_id is None:
             track_id = generate_track_id("insert")
 
-        await self.apipeline_enqueue_documents(input, ids, file_paths, track_id)
-        await self.apipeline_process_enqueue_documents(
-            split_by_character, split_by_character_only
-        )
+        doc_count = len(input) if isinstance(input, list) else 1
+        async with mf_trace.trace_insert(
+            doc_count=doc_count, metadata={"track_id": track_id}
+        ):
+            await self.apipeline_enqueue_documents(input, ids, file_paths, track_id)
+            await self.apipeline_process_enqueue_documents(
+                split_by_character, split_by_character_only
+            )
 
         return track_id
 
@@ -2614,6 +2644,7 @@ summarize_entity_descriptions            system_prompt (Optional[str]): Custom p
             actual data is nested under the 'data' field, with 'status' and 'message'
             fields at the top level.
         """
+        query_start = time.perf_counter()
         global_config = asdict(self)
 
         # Create a copy of param to avoid modifying the original
@@ -2708,6 +2739,7 @@ summarize_entity_descriptions            system_prompt (Optional[str]): Custom p
                 logger.warning("[aquery_data] No data section found in query result")
 
         await self._query_done()
+        _log_timing("aquery_data.total", (time.perf_counter() - query_start) * 1000)
         return final_data
 
     async def aquery_llm(
@@ -2730,9 +2762,20 @@ summarize_entity_descriptions            system_prompt (Optional[str]): Custom p
         Returns:
             dict[str, Any]: Complete response with structured data and LLM response.
         """
+        query_start = time.perf_counter()
         logger.debug(f"[aquery_llm] Query param: {param}")
 
         global_config = asdict(self)
+
+        # MLflow tracing: start parent span for the entire query
+        _mf_trace_ctx = mf_trace.trace_query(
+            query, param.mode, {
+                "top_k": param.top_k,
+                "chunk_top_k": param.chunk_top_k,
+                "stream": param.stream,
+            }
+        )
+        _mf_span = await _mf_trace_ctx.__aenter__()
 
         try:
             query_result = None
@@ -2774,6 +2817,9 @@ summarize_entity_descriptions            system_prompt (Optional[str]): Custom p
                     stream=param.stream,
                 )
                 if type(response) is str:
+                    _log_timing(
+                        "aquery_llm.total", (time.perf_counter() - query_start) * 1000
+                    )
                     return {
                         "status": "success",
                         "message": "Bypass mode LLM non streaming response",
@@ -2786,6 +2832,9 @@ summarize_entity_descriptions            system_prompt (Optional[str]): Custom p
                         },
                     }
                 else:
+                    _log_timing(
+                        "aquery_llm.total", (time.perf_counter() - query_start) * 1000
+                    )
                     return {
                         "status": "success",
                         "message": "Bypass mode LLM streaming response",
@@ -2804,6 +2853,9 @@ summarize_entity_descriptions            system_prompt (Optional[str]): Custom p
 
             # Check if query_result is None
             if query_result is None:
+                _log_timing(
+                    "aquery_llm.total", (time.perf_counter() - query_start) * 1000
+                )
                 return {
                     "status": "failure",
                     "message": "Query returned no results",
@@ -2831,6 +2883,12 @@ summarize_entity_descriptions            system_prompt (Optional[str]): Custom p
                 "is_streaming": query_result.is_streaming,
             }
 
+            # MLflow: log retrieval artifacts (entities, relationships, chunks)
+            mf_trace.log_retrieval_artifacts(_mf_span, raw_data)
+
+            _log_timing(
+                "aquery_llm.total", (time.perf_counter() - query_start) * 1000
+            )
             return raw_data
 
         except Exception as e:
@@ -2847,6 +2905,9 @@ summarize_entity_descriptions            system_prompt (Optional[str]): Custom p
                     "is_streaming": False,
                 },
             }
+        finally:
+            # End MLflow trace span
+            await _mf_trace_ctx.__aexit__(None, None, None)
 
     def query_llm(
         self,

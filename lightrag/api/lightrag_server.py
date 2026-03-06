@@ -498,9 +498,7 @@ def create_app(args):
         ) -> str:
             from lightrag.llm.openai import openai_complete_if_cache
 
-            keyword_extraction = kwargs.pop("keyword_extraction", None)
-            if keyword_extraction:
-                kwargs["response_format"] = GPTKeywordExtractionFormat
+            kwargs.pop("keyword_extraction", None)
             if history_messages is None:
                 history_messages = []
 
@@ -535,9 +533,7 @@ def create_app(args):
         ) -> str:
             from lightrag.llm.azure_openai import azure_openai_complete_if_cache
 
-            keyword_extraction = kwargs.pop("keyword_extraction", None)
-            if keyword_extraction:
-                kwargs["response_format"] = GPTKeywordExtractionFormat
+            kwargs.pop("keyword_extraction", None)
             if history_messages is None:
                 history_messages = []
 
@@ -887,6 +883,66 @@ def create_app(args):
         "EMBEDDING_TIMEOUT", DEFAULT_EMBEDDING_TIMEOUT, int
     )
 
+    def create_keyword_llm_func(args):
+        """Create keyword extraction LLM function if configured via environment variables.
+
+        Returns None if keyword LLM is not configured, in which case the main LLM will be used.
+        Currently supports 'openai' binding (OpenAI-compatible APIs including vLLM, SGLang, etc.)
+        """
+        if not args.keyword_llm_binding or not args.keyword_llm_model:
+            return None
+
+        if args.keyword_llm_binding == "openai":
+            from lightrag.llm.openai import openai_complete_if_cache
+
+            # Pre-configure extra_body if provided
+            extra_kwargs = {}
+            if args.keyword_llm_extra_body:
+                extra_kwargs["extra_body"] = args.keyword_llm_extra_body
+
+            async def keyword_llm_func(
+                prompt,
+                system_prompt=None,
+                history_messages=None,
+                keyword_extraction=False,
+                **kwargs,
+            ):
+                # Merge pre-configured kwargs with call-time kwargs
+                merged_kwargs = {**extra_kwargs, **kwargs}
+
+                # Clean up internal kwargs that shouldn't reach the API
+                merged_kwargs.pop("keyword_extraction", None)
+                merged_kwargs.pop("_priority", None)
+
+                if history_messages is None:
+                    history_messages = []
+
+                return await openai_complete_if_cache(
+                    args.keyword_llm_model,
+                    prompt,
+                    system_prompt=system_prompt,
+                    history_messages=history_messages,
+                    base_url=args.keyword_llm_binding_host,
+                    api_key=args.keyword_llm_binding_api_key,
+                    timeout=llm_timeout,
+                    **merged_kwargs,
+                )
+
+            logger.info(
+                f"Keyword extraction LLM configured: {args.keyword_llm_model} "
+                f"at {args.keyword_llm_binding_host}"
+            )
+            return keyword_llm_func
+
+        logger.warning(
+            f"Unsupported keyword LLM binding: {args.keyword_llm_binding}. "
+            "Only 'openai' is currently supported. Using main LLM for keyword extraction."
+        )
+        return None
+
+    # Create keyword extraction LLM function if configured
+    keyword_llm_func = create_keyword_llm_func(args)
+
     async def bedrock_model_complete(
         prompt,
         system_prompt=None,
@@ -897,9 +953,7 @@ def create_app(args):
         # Lazy import
         from lightrag.llm.bedrock import bedrock_complete_if_cache
 
-        keyword_extraction = kwargs.pop("keyword_extraction", None)
-        if keyword_extraction:
-            kwargs["response_format"] = GPTKeywordExtractionFormat
+        kwargs.pop("keyword_extraction", None)
         if history_messages is None:
             history_messages = []
 
@@ -1082,6 +1136,7 @@ def create_app(args):
                 "entity_types": args.entity_types,
             },
             ollama_server_infos=ollama_server_infos,
+            keyword_llm_func=keyword_llm_func,
         )
     except Exception as e:
         logger.error(f"Failed to initialize LightRAG: {e}")
@@ -1277,12 +1332,25 @@ def create_app(args):
                     "rerank_binding_host": args.rerank_binding_host
                     if rerank_model_func
                     else None,
+                    # Keyword extraction LLM configuration
+                    "keyword_llm_enabled": keyword_llm_func is not None,
+                    "keyword_llm_binding": args.keyword_llm_binding
+                    if keyword_llm_func
+                    else None,
+                    "keyword_llm_model": args.keyword_llm_model
+                    if keyword_llm_func
+                    else None,
+                    "keyword_llm_binding_host": args.keyword_llm_binding_host
+                    if keyword_llm_func
+                    else None,
                     # Environment variable status (requested configuration)
                     "summary_language": args.summary_language,
                     "force_llm_summary_on_merge": args.force_llm_summary_on_merge,
                     "max_parallel_insert": args.max_parallel_insert,
                     "cosine_threshold": args.cosine_threshold,
                     "min_rerank_score": args.min_rerank_score,
+                    "max_rerank_candidates": args.max_rerank_candidates,
+                    "min_cosine_for_rerank": args.min_cosine_for_rerank,
                     "related_chunk_number": args.related_chunk_number,
                     "max_async": args.max_async,
                     "embedding_func_max_async": args.embedding_func_max_async,

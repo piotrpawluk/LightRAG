@@ -357,7 +357,8 @@ export default function RetrievalTesting() {
       const queryParams = {
         ...state.querySettings,
         query: actualQuery,
-        response_type: 'Multiple Paragraphs',
+        response_type: state.querySettings.response_type || 'Single Paragraph',
+        include_references: state.querySettings.include_references ?? false,
         conversation_history: effectiveHistoryTurns > 0
           ? prevMessages
             .filter((m) => m.isError !== true)

@@ -100,7 +100,7 @@ class QueryParam:
     only_need_prompt: bool = False
     """If True, only returns the generated prompt without producing a response."""
 
-    response_type: str = "Multiple Paragraphs"
+    response_type: str = "Single Paragraph"
     """Defines the response format. Examples: 'Multiple Paragraphs', 'Single Paragraph', 'Bullet Points'."""
 
     stream: bool = False

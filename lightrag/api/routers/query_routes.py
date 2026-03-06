@@ -365,7 +365,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             "query": "Explain neural networks",
             "mode": "hybrid",
             "include_references": true,
-            "response_type": "Multiple Paragraphs",
+            "response_type": "Single Paragraph",
             "top_k": 10
         }
         ```

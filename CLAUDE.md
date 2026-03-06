@@ -329,3 +329,15 @@ Set `LIGHTRAG_*` variables for integration tests:
 - Significantly improves retrieval quality
 - Recommended models: `BAAI/bge-reranker-v2-m3`, Jina rerankers
 - Use "mix" mode when reranker is enabled
+
+## ADD Methodology
+
+This project follows Agent Driven Development (ADD) for structured code generation and knowledge persistence.
+
+**Configuration:** `.add/config.json`
+**Knowledge Base:** `.add/learnings.md` (auto-populated during development)
+**Quality Gates:** Enforced via `/add:verify` command
+**Workflow:** `/add:spec` -> `/add:plan` -> `/add:tdd-cycle` -> `/add:retro`
+**Feature Specs:** Uses kiro-spec-driven plugin for new feature specifications
+
+See `.add/config.json` for detailed settings.

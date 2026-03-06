@@ -123,6 +123,7 @@ const useSettingsStoreBase = create<SettingsState>()(
 
       querySettings: {
         mode: 'global',
+        response_type: 'Single Paragraph',
         top_k: 40,
         chunk_top_k: 20,
         max_entity_tokens: 6000,
@@ -133,7 +134,8 @@ const useSettingsStoreBase = create<SettingsState>()(
         stream: true,
         history_turns: 0,
         user_prompt: '',
-        enable_rerank: true
+        enable_rerank: true,
+        include_references: false
       },
 
       setTheme: (theme: Theme) => set({ theme }),
@@ -238,7 +240,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 19,
+      version: 21,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -339,6 +341,13 @@ const useSettingsStoreBase = create<SettingsState>()(
           // Remove deprecated response_type parameter
           if (state.querySettings) {
             delete state.querySettings.response_type
+          }
+        }
+        if (version < 20) {
+          // Add response_type and include_references settings
+          if (state.querySettings) {
+            state.querySettings.response_type = 'Single Paragraph'
+            state.querySettings.include_references = false
           }
         }
         return state

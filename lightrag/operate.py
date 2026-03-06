@@ -68,6 +68,7 @@ from lightrag.constants import (
     DEFAULT_ENTITY_NAME_MAX_LENGTH,
 )
 from lightrag.kg.shared_storage import get_storage_keyed_lock
+from lightrag import mlflow_integration as mf_trace
 import time
 from dotenv import load_dotenv
 
@@ -75,6 +76,15 @@ from dotenv import load_dotenv
 # allows to use different .env file for each lightrag instance
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=False)
+
+
+from datetime import datetime
+
+
+def _log_timing(operation_name: str, elapsed_ms: float) -> None:
+    """Log timing with timestamp for performance analysis."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    logger.info(f"[TIMING] [{timestamp}] {operation_name}: {elapsed_ms:.2f}ms")
 
 
 def _truncate_entity_identifier(
@@ -2760,6 +2770,13 @@ async def merge_nodes_and_edges(
 
     log_message = f"Completed merging: {len(processed_entities)} entities, {len(all_added_entities)} extra entities, {len(processed_edges)} relations"
     logger.info(log_message)
+    mf_trace.trace_operation(
+        "lightrag.insert.merge",
+        {
+            "nodes_merged": len(processed_entities) + len(all_added_entities),
+            "edges_merged": len(processed_edges),
+        },
+    )
     async with pipeline_status_lock:
         pipeline_status["latest_message"] = log_message
         pipeline_status["history_messages"].append(log_message)
@@ -3009,6 +3026,10 @@ async def extract_entities(
 
     # If all tasks completed successfully, chunk_results already contains the results
     # Return the chunk_results for later processing in merge_nodes_and_edges
+    mf_trace.trace_operation(
+        "lightrag.insert.extraction",
+        {"chunks_processed": len(chunk_results), "total_chunks": total_chunks},
+    )
     return chunk_results
 
 
@@ -3054,6 +3075,8 @@ async def kg_query(
 
         Returns None when no relevant context could be constructed for the query.
     """
+    query_start = time.perf_counter()
+
     if not query:
         return QueryResult(content=PROMPTS["fail_response"])
 
@@ -3084,6 +3107,7 @@ async def kg_query(
             return None
 
     # Run both in parallel
+    kw_embed_start = time.perf_counter()
     keyword_task = asyncio.create_task(
         get_keywords_from_query(query, query_param, global_config, hashing_kv)
     )
@@ -3091,6 +3115,13 @@ async def kg_query(
 
     (hl_keywords, ll_keywords), query_embedding = await asyncio.gather(
         keyword_task, embedding_task
+    )
+    _kw_elapsed = (time.perf_counter() - kw_embed_start) * 1000
+    _log_timing("kg_query.keyword_embedding_extraction", _kw_elapsed)
+    mf_trace.trace_operation(
+        "lightrag.query.keyword_extraction",
+        {"hl_keywords_count": len(hl_keywords), "ll_keywords_count": len(ll_keywords),
+         "latency_ms": _kw_elapsed},
     )
 
     logger.debug(f"High-level keywords: {hl_keywords}")
@@ -3113,6 +3144,7 @@ async def kg_query(
 
     # Build query context (unified interface)
     # Pass pre-computed embedding to avoid redundant computation
+    ctx_start = time.perf_counter()
     context_result = await _build_query_context(
         query,
         ll_keywords_str,
@@ -3125,6 +3157,19 @@ async def kg_query(
         chunks_vdb,
         query_embedding,
     )
+    _ctx_elapsed = (time.perf_counter() - ctx_start) * 1000
+    _log_timing("kg_query.build_context", _ctx_elapsed)
+    if context_result is not None:
+        _raw = context_result.raw_data or {}
+        mf_trace.trace_operation(
+            "lightrag.query.retrieval",
+            {
+                "latency_ms": _ctx_elapsed,
+                "entities_found": len(_raw.get("entities", [])) if isinstance(_raw.get("entities"), list) else 0,
+                "relations_found": len(_raw.get("relations", [])) if isinstance(_raw.get("relations"), list) else 0,
+                "chunks_found": len(_raw.get("chunks", [])) if isinstance(_raw.get("chunks"), list) else 0,
+            },
+        )
 
     if context_result is None:
         logger.info("[kg_query] No query context could be built; returning no-result.")
@@ -3140,7 +3185,7 @@ async def kg_query(
     response_type = (
         query_param.response_type
         if query_param.response_type
-        else "Multiple Paragraphs"
+        else "Single Paragraph"
     )
 
     # Build system prompt
@@ -3190,13 +3235,20 @@ async def kg_query(
             " == LLM cache == Query cache hit, using cached response as query result"
         )
         response = cached_response
+        mf_trace.trace_llm_call(cache_hit=True, cache_type="query")
     else:
+        llm_start = time.perf_counter()
         response = await use_model_func(
             user_query,
             system_prompt=sys_prompt,
             history_messages=query_param.conversation_history,
             enable_cot=True,
             stream=query_param.stream,
+        )
+        _llm_elapsed = (time.perf_counter() - llm_start) * 1000
+        _log_timing("kg_query.llm_call", _llm_elapsed)
+        mf_trace.trace_llm_call(
+            cache_hit=False, cache_type="query", latency_ms=_llm_elapsed
         )
 
         if hashing_kv and hashing_kv.global_config.get("enable_llm_cache"):
@@ -3239,9 +3291,11 @@ async def kg_query(
                 .strip()
             )
 
+        _log_timing("kg_query.total", (time.perf_counter() - query_start) * 1000)
         return QueryResult(content=response, raw_data=context_result.raw_data)
     else:
         # Streaming response (AsyncIterator)
+        _log_timing("kg_query.total", (time.perf_counter() - query_start) * 1000)
         return QueryResult(
             response_iterator=response,
             raw_data=context_result.raw_data,
@@ -3335,8 +3389,15 @@ async def extract_keywords_only(
     )
 
     # 4. Call the LLM for keyword extraction
+    # Use dedicated keyword model if configured (faster for simple extraction tasks)
     if param.model_func:
         use_model_func = param.model_func
+    elif global_config.get("keyword_llm_func"):
+        # Use dedicated smaller/faster model for keyword extraction
+        use_model_func = global_config["keyword_llm_func"]
+        # Apply higher priority (5) to keyword extraction
+        use_model_func = partial(use_model_func, _priority=5)
+        logger.debug("[extract_keywords] Using dedicated keyword LLM model")
     else:
         use_model_func = global_config["llm_model_func"]
         # Apply higher priority (5) to query relation LLM function
@@ -3438,6 +3499,9 @@ async def _get_vector_context(
                     "source_type": "vector",  # Mark the source type
                     "chunk_id": result.get("id"),  # Add chunk_id for deduplication
                 }
+                # Preserve cosine similarity score for pre-filtering before reranking
+                if "distance" in result:
+                    chunk_with_metadata["distance"] = result["distance"]
                 valid_chunks.append(chunk_with_metadata)
 
         logger.info(
@@ -3471,6 +3535,7 @@ async def _perform_kg_search(
             If provided, skips embedding computation for better performance
             (allows concurrent execution with keyword extraction).
     """
+    total_start = time.perf_counter()
 
     # Initialize result containers
     local_entities = []
@@ -3502,19 +3567,29 @@ async def _perform_kg_search(
 
     # Handle local and global modes
     if query_param.mode == "local" and len(ll_keywords) > 0:
+        entity_start = time.perf_counter()
         local_entities, local_relations = await _get_node_data(
             ll_keywords,
             knowledge_graph_inst,
             entities_vdb,
             query_param,
         )
+        _log_timing(
+            "_perform_kg_search.entity_retrieval",
+            (time.perf_counter() - entity_start) * 1000,
+        )
 
     elif query_param.mode == "global" and len(hl_keywords) > 0:
+        rel_start = time.perf_counter()
         global_relations, global_entities = await _get_edge_data(
             hl_keywords,
             knowledge_graph_inst,
             relationships_vdb,
             query_param,
+        )
+        _log_timing(
+            "_perform_kg_search.relationship_retrieval",
+            (time.perf_counter() - rel_start) * 1000,
         )
 
     else:  # hybrid or mix mode
@@ -3557,7 +3632,12 @@ async def _perform_kg_search(
 
         # Execute all tasks in parallel for better performance
         if tasks:
+            parallel_start = time.perf_counter()
             results = await asyncio.gather(*tasks, return_exceptions=True)
+            _log_timing(
+                "_perform_kg_search.parallel_retrieval",
+                (time.perf_counter() - parallel_start) * 1000,
+            )
 
             # Unpack results based on task_keys
             for key, result in zip(task_keys, results):
@@ -3644,6 +3724,9 @@ async def _perform_kg_search(
         f"Raw search results: {len(final_entities)} entities, {len(final_relations)} relations, {len(vector_chunks)} vector chunks"
     )
 
+    _log_timing(
+        "_perform_kg_search.total", (time.perf_counter() - total_start) * 1000
+    )
     return {
         "final_entities": final_entities,
         "final_relations": final_relations,
@@ -3879,13 +3962,15 @@ async def _merge_all_chunks(
             chunk_id = chunk.get("chunk_id") or chunk.get("id")
             if chunk_id and chunk_id not in seen_chunk_ids:
                 seen_chunk_ids.add(chunk_id)
-                merged_chunks.append(
-                    {
-                        "content": chunk["content"],
-                        "file_path": chunk.get("file_path", "unknown_source"),
-                        "chunk_id": chunk_id,
-                    }
-                )
+                merged_chunk = {
+                    "content": chunk["content"],
+                    "file_path": chunk.get("file_path", "unknown_source"),
+                    "chunk_id": chunk_id,
+                }
+                # Preserve cosine similarity score for pre-filtering before reranking
+                if "distance" in chunk:
+                    merged_chunk["distance"] = chunk["distance"]
+                merged_chunks.append(merged_chunk)
 
         # Add from entity chunks (Local mode)
         if i < len(entity_chunks):
@@ -3893,13 +3978,15 @@ async def _merge_all_chunks(
             chunk_id = chunk.get("chunk_id") or chunk.get("id")
             if chunk_id and chunk_id not in seen_chunk_ids:
                 seen_chunk_ids.add(chunk_id)
-                merged_chunks.append(
-                    {
-                        "content": chunk["content"],
-                        "file_path": chunk.get("file_path", "unknown_source"),
-                        "chunk_id": chunk_id,
-                    }
-                )
+                merged_chunk = {
+                    "content": chunk["content"],
+                    "file_path": chunk.get("file_path", "unknown_source"),
+                    "chunk_id": chunk_id,
+                }
+                # Preserve cosine similarity score for pre-filtering before reranking
+                if "distance" in chunk:
+                    merged_chunk["distance"] = chunk["distance"]
+                merged_chunks.append(merged_chunk)
 
         # Add from relation chunks (Global mode)
         if i < len(relation_chunks):
@@ -3907,13 +3994,15 @@ async def _merge_all_chunks(
             chunk_id = chunk.get("chunk_id") or chunk.get("id")
             if chunk_id and chunk_id not in seen_chunk_ids:
                 seen_chunk_ids.add(chunk_id)
-                merged_chunks.append(
-                    {
-                        "content": chunk["content"],
-                        "file_path": chunk.get("file_path", "unknown_source"),
-                        "chunk_id": chunk_id,
-                    }
-                )
+                merged_chunk = {
+                    "content": chunk["content"],
+                    "file_path": chunk.get("file_path", "unknown_source"),
+                    "chunk_id": chunk_id,
+                }
+                # Preserve cosine similarity score for pre-filtering before reranking
+                if "distance" in chunk:
+                    merged_chunk["distance"] = chunk["distance"]
+                merged_chunks.append(merged_chunk)
 
     logger.info(
         f"Round-robin merged chunks: {origin_len} -> {len(merged_chunks)} (deduplicated {origin_len - len(merged_chunks)})"
@@ -4127,12 +4216,14 @@ async def _build_query_context(
         precomputed_query_embedding: Optional pre-computed query embedding for
             better performance (allows concurrent execution with keyword extraction).
     """
+    total_start = time.perf_counter()
 
     if not query:
         logger.warning("Query is empty, skipping context building")
         return None
 
     # Stage 1: Pure search
+    search_start = time.perf_counter()
     search_result = await _perform_kg_search(
         query,
         ll_keywords,
@@ -4145,6 +4236,9 @@ async def _build_query_context(
         chunks_vdb,
         precomputed_query_embedding,
     )
+    _log_timing(
+        "_build_query_context.kg_search", (time.perf_counter() - search_start) * 1000
+    )
 
     if not search_result["final_entities"] and not search_result["final_relations"]:
         if query_param.mode != "mix":
@@ -4154,13 +4248,19 @@ async def _build_query_context(
                 return None
 
     # Stage 2: Apply token truncation for LLM efficiency
+    trunc_start = time.perf_counter()
     truncation_result = await _apply_token_truncation(
         search_result,
         query_param,
         text_chunks_db.global_config,
     )
+    _log_timing(
+        "_build_query_context.token_truncation",
+        (time.perf_counter() - trunc_start) * 1000,
+    )
 
     # Stage 3: Merge chunks using filtered entities/relations
+    merge_start = time.perf_counter()
     merged_chunks = await _merge_all_chunks(
         filtered_entities=truncation_result["filtered_entities"],
         filtered_relations=truncation_result["filtered_relations"],
@@ -4173,6 +4273,9 @@ async def _build_query_context(
         chunk_tracking=search_result["chunk_tracking"],
         query_embedding=search_result["query_embedding"],
     )
+    _log_timing(
+        "_build_query_context.chunk_merging", (time.perf_counter() - merge_start) * 1000
+    )
 
     if (
         not merged_chunks
@@ -4183,6 +4286,7 @@ async def _build_query_context(
 
     # Stage 4: Build final LLM context with dynamic token processing
     # _build_context_str now always returns tuple[str, dict]
+    build_start = time.perf_counter()
     context, raw_data = await _build_context_str(
         entities_context=truncation_result["entities_context"],
         relations_context=truncation_result["relations_context"],
@@ -4193,6 +4297,9 @@ async def _build_query_context(
         chunk_tracking=search_result["chunk_tracking"],
         entity_id_to_original=truncation_result["entity_id_to_original"],
         relation_id_to_original=truncation_result["relation_id_to_original"],
+    )
+    _log_timing(
+        "_build_query_context.context_string", (time.perf_counter() - build_start) * 1000
     )
 
     # Convert keywords strings to lists and add complete metadata to raw_data
@@ -4228,6 +4335,9 @@ async def _build_query_context(
         f"[_build_query_context] Raw data entities: {len(raw_data.get('data', {}).get('entities', []))}, relationships: {len(raw_data.get('data', {}).get('relationships', []))}, chunks: {len(raw_data.get('data', {}).get('chunks', []))}"
     )
 
+    _log_timing(
+        "_build_query_context.total", (time.perf_counter() - total_start) * 1000
+    )
     return QueryContextResult(context=context, raw_data=raw_data)
 
 
@@ -4848,6 +4958,7 @@ async def naive_query(
 
         Returns None when no relevant chunks are retrieved.
     """
+    query_start = time.perf_counter()
 
     if not query:
         return QueryResult(content=PROMPTS["fail_response"])
@@ -4864,7 +4975,14 @@ async def naive_query(
         logger.error("Tokenizer not found in global configuration.")
         return QueryResult(content=PROMPTS["fail_response"])
 
+    vec_start = time.perf_counter()
     chunks = await _get_vector_context(query, chunks_vdb, query_param, None)
+    _vec_elapsed = (time.perf_counter() - vec_start) * 1000
+    _log_timing("naive_query.vector_search", _vec_elapsed)
+    mf_trace.trace_operation(
+        "lightrag.query.retrieval",
+        {"chunks_found": len(chunks) if chunks else 0, "latency_ms": _vec_elapsed},
+    )
 
     if chunks is None or len(chunks) == 0:
         logger.info(
@@ -4912,6 +5030,7 @@ async def naive_query(
     )
 
     # Process chunks using unified processing with dynamic token limit
+    proc_start = time.perf_counter()
     processed_chunks = await process_chunks_unified(
         query=query,
         unique_chunks=chunks,
@@ -4919,6 +5038,9 @@ async def naive_query(
         global_config=global_config,
         source_type="vector",
         chunk_token_limit=available_chunk_tokens,  # Pass dynamic limit
+    )
+    _log_timing(
+        "naive_query.chunk_processing", (time.perf_counter() - proc_start) * 1000
     )
 
     # Generate reference list from processed chunks using the new common function
@@ -5011,13 +5133,20 @@ async def naive_query(
             " == LLM cache == Query cache hit, using cached response as query result"
         )
         response = cached_response
+        mf_trace.trace_llm_call(cache_hit=True, cache_type="query")
     else:
+        llm_start = time.perf_counter()
         response = await use_model_func(
             user_query,
             system_prompt=sys_prompt,
             history_messages=query_param.conversation_history,
             enable_cot=True,
             stream=query_param.stream,
+        )
+        _naive_llm_elapsed = (time.perf_counter() - llm_start) * 1000
+        _log_timing("naive_query.llm_call", _naive_llm_elapsed)
+        mf_trace.trace_llm_call(
+            cache_hit=False, cache_type="query", latency_ms=_naive_llm_elapsed
         )
 
         if hashing_kv and hashing_kv.global_config.get("enable_llm_cache"):
@@ -5059,9 +5188,11 @@ async def naive_query(
                 .strip()
             )
 
+        _log_timing("naive_query.total", (time.perf_counter() - query_start) * 1000)
         return QueryResult(content=response, raw_data=raw_data)
     else:
         # Streaming response (AsyncIterator)
+        _log_timing("naive_query.total", (time.perf_counter() - query_start) * 1000)
         return QueryResult(
             response_iterator=response, raw_data=raw_data, is_streaming=True
         )

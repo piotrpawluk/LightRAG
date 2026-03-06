@@ -19,6 +19,7 @@ from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 from starlette.status import HTTP_403_FORBIDDEN
 from .auth import auth_handler
 from .config import ollama_server_infos, global_args, get_env_value
+from lightrag.mlflow_integration import mlflow_user_context
 
 logger = logging.getLogger("lightrag")
 
@@ -120,12 +121,20 @@ def get_combined_auth_dependency(api_key: Optional[str] = None):
             if (is_prefix and path.startswith(pattern)) or (
                 not is_prefix and path == pattern
             ):
+                # Whitelist path — set fallback user identity for MLflow tracing
+                if not mlflow_user_context.get():
+                    mlflow_user_context.set(os.environ.get("MLFLOW_USER", "anonymous"))
                 return  # Whitelist path, allow access
 
         # 2. Validate token first if provided in the request (Ensure 401 error if token is invalid)
         if token:
             try:
                 token_info = auth_handler.validate_token(token)
+
+                # Capture JWT username for MLflow tracing
+                jwt_username = token_info.get("username")
+                if jwt_username:
+                    mlflow_user_context.set(jwt_username)
 
                 # ========== Token Auto-Renewal Logic ==========
                 from lightrag.api.config import global_args
@@ -220,6 +229,10 @@ def get_combined_auth_dependency(api_key: Optional[str] = None):
 
         # 3. Acept all request if no API protection needed
         if not auth_configured and not api_key_configured:
+            # Set fallback user identity for MLflow tracing
+            if not mlflow_user_context.get():
+                fallback_user = os.environ.get("MLFLOW_USER", "anonymous")
+                mlflow_user_context.set(fallback_user)
             return
 
         # 4. Validate API key if provided and API-Key authentication is configured
@@ -228,6 +241,10 @@ def get_combined_auth_dependency(api_key: Optional[str] = None):
             and api_key_header_value
             and api_key_header_value == api_key
         ):
+            # Set API key user identity for MLflow tracing
+            if not mlflow_user_context.get():
+                fallback_user = os.environ.get("MLFLOW_USER", "api_key_user")
+                mlflow_user_context.set(fallback_user)
             return  # API key validation successful
 
         ### Authentication failed ####

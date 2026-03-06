@@ -1271,8 +1271,6 @@ async def pipeline_enqueue_file(
                     ".txt"
                     | ".md"
                     | ".mdx"
-                    | ".html"
-                    | ".htm"
                     | ".tex"
                     | ".json"
                     | ".xml"
@@ -1362,6 +1360,48 @@ async def pipeline_enqueue_file(
                         )
                         return False, track_id
 
+                case ".html" | ".htm":
+                    try:
+                        # Try DOCLING first if configured and available
+                        if (
+                            global_args.document_loading_engine == "DOCLING"
+                            and _is_docling_available()
+                        ):
+                            try:
+                                content = await asyncio.to_thread(
+                                    _convert_with_docling, file_path
+                                )
+                            except Exception as docling_err:
+                                logger.warning(
+                                    f"DOCLING failed for {file_path.name}: {docling_err}. Falling back to UTF-8 decode."
+                                )
+                                content = file.decode("utf-8")
+                        else:
+                            if (
+                                global_args.document_loading_engine == "DOCLING"
+                                and not _is_docling_available()
+                            ):
+                                logger.warning(
+                                    f"DOCLING engine configured but not available for {file_path.name}. Falling back to UTF-8 decode."
+                                )
+                            content = file.decode("utf-8")
+                    except Exception as e:
+                        error_files = [
+                            {
+                                "file_path": str(file_path.name),
+                                "error_description": "[File Extraction]HTML processing error",
+                                "original_error": f"Failed to extract text from HTML: {str(e)}",
+                                "file_size": file_size,
+                            }
+                        ]
+                        await rag.apipeline_enqueue_error_documents(
+                            error_files, track_id
+                        )
+                        logger.error(
+                            f"[File Extraction]Error processing HTML {file_path.name}: {str(e)}"
+                        )
+                        return False, track_id
+
                 case ".pdf":
                     try:
                         # Try DOCLING first if configured and available
@@ -1369,9 +1409,19 @@ async def pipeline_enqueue_file(
                             global_args.document_loading_engine == "DOCLING"
                             and _is_docling_available()
                         ):
-                            content = await asyncio.to_thread(
-                                _convert_with_docling, file_path
-                            )
+                            try:
+                                content = await asyncio.to_thread(
+                                    _convert_with_docling, file_path
+                                )
+                            except Exception as docling_err:
+                                logger.warning(
+                                    f"DOCLING failed for {file_path.name}: {docling_err}. Falling back to pypdf."
+                                )
+                                content = await asyncio.to_thread(
+                                    _extract_pdf_pypdf,
+                                    file,
+                                    global_args.pdf_decrypt_password,
+                                )
                         else:
                             if (
                                 global_args.document_loading_engine == "DOCLING"
@@ -1410,9 +1460,15 @@ async def pipeline_enqueue_file(
                             global_args.document_loading_engine == "DOCLING"
                             and _is_docling_available()
                         ):
-                            content = await asyncio.to_thread(
-                                _convert_with_docling, file_path
-                            )
+                            try:
+                                content = await asyncio.to_thread(
+                                    _convert_with_docling, file_path
+                                )
+                            except Exception as docling_err:
+                                logger.warning(
+                                    f"DOCLING failed for {file_path.name}: {docling_err}. Falling back to python-docx."
+                                )
+                                content = await asyncio.to_thread(_extract_docx, file)
                         else:
                             if (
                                 global_args.document_loading_engine == "DOCLING"
@@ -1447,9 +1503,15 @@ async def pipeline_enqueue_file(
                             global_args.document_loading_engine == "DOCLING"
                             and _is_docling_available()
                         ):
-                            content = await asyncio.to_thread(
-                                _convert_with_docling, file_path
-                            )
+                            try:
+                                content = await asyncio.to_thread(
+                                    _convert_with_docling, file_path
+                                )
+                            except Exception as docling_err:
+                                logger.warning(
+                                    f"DOCLING failed for {file_path.name}: {docling_err}. Falling back to python-pptx."
+                                )
+                                content = await asyncio.to_thread(_extract_pptx, file)
                         else:
                             if (
                                 global_args.document_loading_engine == "DOCLING"
@@ -1484,9 +1546,15 @@ async def pipeline_enqueue_file(
                             global_args.document_loading_engine == "DOCLING"
                             and _is_docling_available()
                         ):
-                            content = await asyncio.to_thread(
-                                _convert_with_docling, file_path
-                            )
+                            try:
+                                content = await asyncio.to_thread(
+                                    _convert_with_docling, file_path
+                                )
+                            except Exception as docling_err:
+                                logger.warning(
+                                    f"DOCLING failed for {file_path.name}: {docling_err}. Falling back to openpyxl."
+                                )
+                                content = await asyncio.to_thread(_extract_xlsx, file)
                         else:
                             if (
                                 global_args.document_loading_engine == "DOCLING"

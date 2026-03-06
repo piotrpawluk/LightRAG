@@ -277,13 +277,14 @@ async def openai_complete_if_cache(
 
     # Remove special kwargs that shouldn't be passed to OpenAI
     kwargs.pop("hashing_kv", None)
+    kwargs.pop("_priority", None)
 
     # Extract client configuration options
     client_configs = kwargs.pop("openai_client_configs", {})
 
-    # Handle keyword extraction mode
-    if keyword_extraction:
-        kwargs["response_format"] = GPTKeywordExtractionFormat
+    # keyword_extraction is handled by the prompt itself;
+    # don't force structured output which breaks non-OpenAI endpoints (vLLM, LM Studio, etc.)
+    kwargs.pop("keyword_extraction", None)
 
     # Create the OpenAI client (supports both OpenAI and Azure)
     openai_async_client = create_openai_async_client(
@@ -587,6 +588,15 @@ async def openai_complete_if_cache(
                 else:
                     # COT disabled, only use regular content
                     final_content = content or ""
+                    # Fallback for thinking models: if content is empty but
+                    # reasoning_content exists, use it — the caller (e.g.
+                    # keyword extraction) can extract structured data via
+                    # json_repair / remove_think_tags.
+                    if (not final_content or final_content.strip() == "") and reasoning_content and reasoning_content.strip():
+                        logger.debug(
+                            "Content was empty with COT disabled, falling back to reasoning_content"
+                        )
+                        final_content = reasoning_content
 
                 # Validate final content
                 if not final_content or final_content.strip() == "":

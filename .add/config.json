@@ -1,0 +1,123 @@
+{
+  "$schema": "https://github.com/MountainUnicorn/add/config.schema.json",
+  "version": "0.1.0",
+  "project": {
+    "name": "LightRAG",
+    "description": "A Retrieval-Augmented Generation framework that uses graph-based knowledge representation for enhanced information retrieval. Extracts entities and relationships from documents, builds a knowledge graph, and uses multi-modal retrieval for queries.",
+    "created": "2026-02-10",
+    "author": "peterpawluk"
+  },
+  "maturity": {
+    "level": "beta",
+    "promoted_from": null,
+    "promoted_date": null,
+    "next_promotion_criteria": "90%+ test coverage, 30+ days production stability, SLAs defined, comprehensive E2E tests"
+  },
+  "architecture": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": ">=3.10 (running 3.12)",
+        "role": "backend"
+      },
+      {
+        "name": "TypeScript",
+        "version": "~5.9",
+        "role": "frontend"
+      }
+    ],
+    "backend": {
+      "framework": "FastAPI",
+      "version": "latest",
+      "runtime": "Python 3.12 + uvicorn/gunicorn"
+    },
+    "frontend": {
+      "framework": "React",
+      "version": "19",
+      "bundler": "vite"
+    },
+    "database": {
+      "type": "Pluggable (Neo4j, PostgreSQL, Redis, Milvus, Qdrant, MongoDB, Faiss, NetworkX)",
+      "version": "multiple"
+    },
+    "containerized": true,
+    "container_strategy": "docker-compose",
+    "suggested_by_claude": false
+  },
+  "infrastructure": {
+    "git_host": "github",
+    "git_remote": "https://github.com/HKUDS/LightRAG.git",
+    "git_fork": "https://github.com/piotrpawluk/LightRAG.git",
+    "cloud_provider": "self-hosted",
+    "cloud_services": ["OKD"],
+    "cicd": {
+      "platform": "github-actions",
+      "scaffolded_by_add": false,
+      "pipeline_file": ".github/workflows/"
+    },
+    "infrastructure_as_code": "none"
+  },
+  "environments": {
+    "tier": 2,
+    "local": {
+      "run": "uvicorn lightrag.api.lightrag_server:app --reload",
+      "test": "python -m pytest tests",
+      "e2e": null,
+      "url": "http://localhost:9621"
+    },
+    "dev": {
+      "deploy_trigger": "push to dev branch",
+      "url": "TBD (OKD DEV)",
+      "verify": ["unit_tests", "integration_tests"]
+    },
+    "qa": {
+      "deploy_trigger": "push to qa branch",
+      "url": "TBD (OKD QA)",
+      "verify": ["integration_tests"]
+    }
+  },
+  "quality": {
+    "mode": "standard",
+    "coverage_threshold": 80,
+    "type_check_blocking": true,
+    "e2e_required": false,
+    "screenshot_protocol": false,
+    "lint": {
+      "backend": "ruff check .",
+      "frontend": "cd lightrag_webui && bun run lint"
+    },
+    "typecheck": {
+      "backend": "mypy lightrag/",
+      "frontend": "cd lightrag_webui && npx tsc --noEmit"
+    },
+    "test": {
+      "unit": "python -m pytest tests",
+      "integration": "python -m pytest tests --run-integration",
+      "e2e": null
+    }
+  },
+  "collaboration": {
+    "autonomy_level": "autonomous",
+    "team_size": "solo",
+    "commit_review_gate": false,
+    "pr_review_gate": true,
+    "deploy_approval_required": true
+  },
+  "source_control": {
+    "branching": "feature-branches",
+    "default_branch": "main",
+    "commit_convention": "conventional",
+    "pr_template": true,
+    "protected_branches": ["main"]
+  },
+  "planning": {
+    "current_milestone": null,
+    "current_cycle": null,
+    "wip_limit": 4,
+    "parallel_agents": 4,
+    "cycle_history": []
+  },
+  "methodology_notes": {
+    "kiro_plugin": "Uses kiro-spec-driven plugin for new feature specifications"
+  }
+}

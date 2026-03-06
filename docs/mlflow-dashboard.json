@@ -1,0 +1,103 @@
+{
+  "description": "LightRAG MLflow Dashboard Configuration. Import into MLflow UI for pre-built views of RAG pipeline traces.",
+  "version": "0.1.0",
+  "experiment_name": "lightrag",
+  "views": {
+    "query_traces": {
+      "description": "All query operations with latency and mode breakdown",
+      "filter": "attributes.`mlflow.traceName` = 'lightrag.query'",
+      "columns": [
+        "attributes.mode",
+        "attributes.query_text",
+        "attributes.top_k",
+        "attributes.chunk_top_k",
+        "attributes.user",
+        "attributes.stream",
+        "duration_ms"
+      ],
+      "sort_by": "start_time",
+      "sort_order": "desc"
+    },
+    "insert_traces": {
+      "description": "All document ingestion operations",
+      "filter": "attributes.`mlflow.traceName` = 'lightrag.insert'",
+      "columns": [
+        "attributes.doc_count",
+        "attributes.track_id",
+        "attributes.user",
+        "duration_ms"
+      ],
+      "sort_by": "start_time",
+      "sort_order": "desc"
+    },
+    "llm_calls": {
+      "description": "Individual LLM calls with cache hit/miss and latency",
+      "filter": "span_name = 'lightrag.llm_call'",
+      "columns": [
+        "attributes.cache_hit",
+        "attributes.model",
+        "attributes.tokens_in",
+        "attributes.tokens_out",
+        "attributes.latency_ms",
+        "attributes.cache_type",
+        "attributes.prompt_hash"
+      ],
+      "sort_by": "start_time",
+      "sort_order": "desc"
+    },
+    "retrieval_operations": {
+      "description": "Retrieval spans showing entities/relations/chunks found",
+      "filter": "span_name LIKE 'lightrag.query.%'",
+      "columns": [
+        "span_name",
+        "attributes.entities_found",
+        "attributes.relations_found",
+        "attributes.chunks_found",
+        "attributes.latency_ms"
+      ],
+      "sort_by": "start_time",
+      "sort_order": "desc"
+    },
+    "cache_hit_rate": {
+      "description": "LLM cache performance overview",
+      "filter": "span_name = 'lightrag.llm_call'",
+      "group_by": "attributes.cache_hit",
+      "aggregation": "count",
+      "chart_type": "pie"
+    }
+  },
+  "metrics": {
+    "query_latency_p50": {
+      "description": "Median query latency",
+      "filter": "attributes.`mlflow.traceName` = 'lightrag.query'",
+      "metric": "duration_ms",
+      "aggregation": "p50"
+    },
+    "query_latency_p95": {
+      "description": "95th percentile query latency",
+      "filter": "attributes.`mlflow.traceName` = 'lightrag.query'",
+      "metric": "duration_ms",
+      "aggregation": "p95"
+    },
+    "cache_hit_rate": {
+      "description": "Percentage of LLM calls served from cache",
+      "filter": "span_name = 'lightrag.llm_call' AND attributes.cache_hit = true",
+      "aggregation": "count_ratio"
+    }
+  },
+  "usage_instructions": {
+    "setup": [
+      "1. Start MLflow server: mlflow server --host 0.0.0.0 --port 5000",
+      "2. Set MLFLOW_TRACKING_URI=http://localhost:5000 in your .env",
+      "3. Optionally set MLFLOW_EXPERIMENT_NAME (default: lightrag)",
+      "4. Start LightRAG server normally",
+      "5. Run queries/inserts — traces appear automatically in MLflow UI"
+    ],
+    "notes": [
+      "This JSON file describes the recommended MLflow UI views for LightRAG traces.",
+      "MLflow does not currently support importing dashboard configs via JSON.",
+      "Use these view definitions as a reference for creating custom views in the MLflow UI.",
+      "Trace names follow the pattern: lightrag.{operation}.{sub_operation}"
+    ]
+  }
+}

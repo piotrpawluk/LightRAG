@@ -11,7 +11,7 @@ DEFAULT_WOKERS = 2
 DEFAULT_MAX_GRAPH_NODES = 1000
 
 # Default values for extraction settings
-DEFAULT_SUMMARY_LANGUAGE = "English"  # Default language for document processing
+DEFAULT_SUMMARY_LANGUAGE = "polski"  # Default language for document processing
 DEFAULT_MAX_GLEANING = 1
 DEFAULT_ENTITY_NAME_MAX_LENGTH = 256
 
@@ -57,6 +57,12 @@ DEFAULT_HISTORY_TURNS = 0
 # Rerank configuration defaults
 DEFAULT_MIN_RERANK_SCORE = 0.0
 DEFAULT_RERANK_BINDING = "null"
+
+# Pre-filtering before reranking (performance optimization)
+# Set to 0 to disable position-based cap (unlimited candidates)
+DEFAULT_MAX_RERANK_CANDIDATES = 0
+# Set to 0.0 to disable cosine score filtering
+DEFAULT_MIN_COSINE_FOR_RERANK = 0.0
 
 # Default source ids limit in meta data for entity and relation
 DEFAULT_MAX_SOURCE_IDS_PER_ENTITY = 300

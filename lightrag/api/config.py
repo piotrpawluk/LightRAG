@@ -29,6 +29,8 @@ from lightrag.constants import (
     DEFAULT_COSINE_THRESHOLD,
     DEFAULT_RELATED_CHUNK_NUMBER,
     DEFAULT_MIN_RERANK_SCORE,
+    DEFAULT_MAX_RERANK_CANDIDATES,
+    DEFAULT_MIN_COSINE_FOR_RERANK,
     DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE,
     DEFAULT_MAX_ASYNC,
     DEFAULT_SUMMARY_MAX_TOKENS,
@@ -414,6 +416,14 @@ def parse_args() -> argparse.Namespace:
         "MIN_RERANK_SCORE", DEFAULT_MIN_RERANK_SCORE, float
     )
 
+    # Pre-filtering before reranking (performance optimization)
+    args.max_rerank_candidates = get_env_value(
+        "MAX_RERANK_CANDIDATES", DEFAULT_MAX_RERANK_CANDIDATES, int
+    )
+    args.min_cosine_for_rerank = get_env_value(
+        "MIN_COSINE_FOR_RERANK", DEFAULT_MIN_COSINE_FOR_RERANK, float
+    )
+
     # Query configuration
     args.history_turns = get_env_value("HISTORY_TURNS", DEFAULT_HISTORY_TURNS, int)
     args.top_k = get_env_value("TOP_K", DEFAULT_TOP_K, int)
@@ -455,6 +465,36 @@ def parse_args() -> argparse.Namespace:
     args.max_upload_size = get_env_value(
         "MAX_UPLOAD_SIZE", 104857600, int, special_none=True
     )
+
+    # Keyword Extraction LLM configuration
+    args.keyword_llm_binding = get_env_value(
+        "KEYWORD_LLM_BINDING", None, special_none=True
+    )
+    args.keyword_llm_model = get_env_value(
+        "KEYWORD_LLM_MODEL", None, special_none=True
+    )
+    args.keyword_llm_binding_host = get_env_value(
+        "KEYWORD_LLM_BINDING_HOST", None, special_none=True
+    )
+    args.keyword_llm_binding_api_key = get_env_value(
+        "KEYWORD_LLM_BINDING_API_KEY", None, special_none=True
+    )
+    args.keyword_llm_extra_body = get_env_value(
+        "KEYWORD_LLM_EXTRA_BODY", None, special_none=True
+    )
+
+    # Parse extra_body as JSON if provided
+    if args.keyword_llm_extra_body:
+        import json
+
+        try:
+            args.keyword_llm_extra_body = json.loads(args.keyword_llm_extra_body)
+        except json.JSONDecodeError as e:
+            logging.warning(
+                f"Failed to parse KEYWORD_LLM_EXTRA_BODY as JSON: {e}. "
+                "Using None instead."
+            )
+            args.keyword_llm_extra_body = None
 
     ollama_server_infos.LIGHTRAG_NAME = args.simulated_model_name
     ollama_server_infos.LIGHTRAG_TAG = args.simulated_model_tag
