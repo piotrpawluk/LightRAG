@@ -16,11 +16,13 @@ LightRAG is a Retrieval-Augmented Generation (RAG) framework that uses graph-bas
 
 - **base.py**: Abstract base classes for storage backends (`BaseKVStorage`, `BaseVectorStorage`, `BaseGraphStorage`, `BaseDocStatusStorage`).
 
-- **kg/**: Storage implementations (JSON, NetworkX, Neo4j, PostgreSQL, MongoDB, Redis, Milvus, Qdrant, Faiss, Memgraph). Each storage type provides different trade-offs for production vs. development use.
+- **kg/**: Storage implementations (JSON, NetworkX, Neo4j, PostgreSQL, MongoDB, Redis, Milvus, Qdrant, Faiss, Memgraph, OpenSearch). Each storage type provides different trade-offs for production vs. development use.
 
 - **llm/**: LLM provider bindings (OpenAI, Ollama, Azure, Gemini, Bedrock, Anthropic, etc.). All use async patterns with caching support.
 
-- **api/**: FastAPI server (`lightrag_server.py`) with REST endpoints and Ollama-compatible API, plus React 19 + TypeScript WebUI.
+- **tools/**: Excel tool manager (`excel_tool_manager.py`) for creating data-lookup tools from uploaded Excel files. Tools are stored in Redis and exposed to the LLM via native tool calling.
+
+- **api/**: FastAPI server (`lightrag_server.py`) with REST endpoints, Ollama-compatible API, tool management routes, plus React 19 + TypeScript WebUI.
 
 ### Storage Layer
 
@@ -39,6 +41,16 @@ Workspace isolation is implemented differently per storage type (subdirectories 
 - **hybrid**: Combines local and global
 - **naive**: Direct vector search without graph
 - **mix**: Integrates KG and vector retrieval (recommended with reranker)
+
+### Native Tool Calling
+
+When Excel tools are registered (requires Redis), queries use LiteLLM for native function calling:
+1. Tool definitions are converted to OpenAI-compatible function schemas
+2. LiteLLM `acompletion()` is called with `tool_choice="auto"`
+3. If the LLM invokes tools, `execute_tool_search()` runs Redis lookups
+4. A second LiteLLM call incorporates tool results into the final response
+
+The LLM provider is determined by `llm_binding` via the `BINDING_TO_LITELLM` mapping in `operate.py` (openai, azure, ollama, gemini, lollms, bedrock).
 
 ## Development Commands
 
