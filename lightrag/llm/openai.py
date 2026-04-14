@@ -348,8 +348,19 @@ async def openai_complete_if_cache(
         await openai_async_client.close()  # Ensure client is closed
         raise
     except Exception as e:
+        body = getattr(e, "body", None)
+        request_id = getattr(e, "request_id", None)
+        req = getattr(e, "request", None)
+        extra_parts = []
+        if body:
+            extra_parts.append(f"Response body: {body}")
+        if request_id:
+            extra_parts.append(f"Request ID: {request_id}")
+        if req is not None:
+            extra_parts.append(f"Request URL: {req.url}")
+        extra = ("\n" + "\n".join(extra_parts)) if extra_parts else ""
         logger.error(
-            f"OpenAI API Call Failed,\nModel: {model},\nParams: {kwargs}, Got: {e}"
+            f"OpenAI API Call Failed,\nModel: {model},\nParams: {kwargs}, Got: {e}{extra}"
         )
         await openai_async_client.close()  # Ensure client is closed
         raise
@@ -950,6 +961,7 @@ async def azure_openai_embed(
     model: str | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
+    embedding_dim: int | None = None,
     token_tracker: Any | None = None,
     client_configs: dict[str, Any] | None = None,
     api_version: str | None = None,
@@ -1022,6 +1034,7 @@ async def azure_openai_embed(
         model=deployment,
         base_url=base_url,
         api_key=api_key,
+        embedding_dim=embedding_dim,
         token_tracker=token_tracker,
         client_configs=client_configs,
         use_azure=True,

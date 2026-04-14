@@ -2,11 +2,11 @@
 
 The LightRAG Server is designed to provide a Web UI and API support. The Web UI facilitates document indexing, knowledge graph exploration, and a simple RAG query interface. LightRAG Server also provides an Ollama-compatible interface, aiming to emulate LightRAG as an Ollama chat model. This allows AI chat bots, such as Open WebUI, to access LightRAG easily.
 
-![image-20250323122538997](./README.assets/image-20250323122538997.png)
+![image-20250323122538997](./LightRAG-API-Server.assets/image-20250323122538997.png)
 
-![image-20250323122754387](./README.assets/image-20250323122754387.png)
+![image-20250323122754387](./LightRAG-API-Server.assets/image-20250323122754387.png)
 
-![image-20250323123011220](./README.assets/image-20250323123011220.png)
+![image-20250323123011220](./LightRAG-API-Server.assets/image-20250323123011220.png)
 
 ## Getting Started
 
@@ -33,16 +33,25 @@ git clone https://github.com/HKUDS/lightrag.git
 # Change to the repository directory
 cd lightrag
 
-# Using uv (recommended)
+# Bootstrap the development environment (recommended)
+make dev
+source .venv/bin/activate  # Activate the virtual environment (Linux/macOS)
+# Or on Windows: .venv\Scripts\activate
+
+# make dev installs the test toolchain plus the full offline stack
+# (API, storage backends, and provider integrations), then builds the frontend.
+# Run make env-base or copy env.example to .env before starting the server.
+
+# Equivalent manual steps with uv
 # Note: uv sync automatically creates a virtual environment in .venv/
-uv sync --extra api
+uv sync --extra test --extra offline
 source .venv/bin/activate  # Activate the virtual environment (Linux/macOS)
 # Or on Windows: .venv\Scripts\activate
 
 # Or using pip with virtual environment
 # python -m venv .venv
 # source .venv/bin/activate  # Windows: .venv\Scripts\activate
-# pip install -e ".[api]"
+# pip install -e ".[test,offline]"
 
 # Build front-end artifacts
 cd lightrag_webui
@@ -104,6 +113,21 @@ EMBEDDING_DIM=1024
 
 > **Important Note**: The Embedding model must be determined before document indexing, and the same model must be used during the document query phase. For certain storage solutions (e.g., PostgreSQL), the vector dimension must be defined upon initial table creation. Therefore, when changing embedding models, it is necessary to delete the existing vector-related tables and allow LightRAG to recreate them with the new dimensions.
 
+### Create .env File With Setup Tool
+
+Instead of editing `env.example` by hand, you can use the interactive setup wizard to generate a configured `.env` and, when needed, `docker-compose.final.yml`:
+
+```bash
+make env-base           # Required first step: LLM, embedding, reranker
+make env-storage        # Optional: storage backends and database services
+make env-server         # Optional: server port, auth, and SSL
+make env-security-check # Optional: audit the current .env for security risks
+```
+
+For a full description of every target and what each flow does, see [docs/InteractiveSetup.md](./InteractiveSetup.md).
+The setup wizards update configuration only; run `make env-security-check` separately to audit the
+current `.env` for security risks before deployment.
+
 ### Starting LightRAG Server
 
 The LightRAG Server supports two operational modes:
@@ -144,7 +168,7 @@ docker compose up
 # If you want the program to run in the background after startup, add the -d parameter at the end of the command.
 ```
 
-You can get the official docker compose file from here: [docker-compose.yml](https://raw.githubusercontent.com/HKUDS/LightRAG/refs/heads/main/docker-compose.yml). For historical versions of LightRAG docker images, visit this link: [LightRAG Docker Images](https://github.com/HKUDS/LightRAG/pkgs/container/lightrag). For more details about docker deployment, please refer to [DockerDeployment.md](./../../docs/DockerDeployment.md).
+You can get the official docker compose file from here: [docker-compose.yml](https://raw.githubusercontent.com/HKUDS/LightRAG/refs/heads/main/docker-compose.yml). For historical versions of LightRAG docker images, visit this link: [LightRAG Docker Images](https://github.com/HKUDS/LightRAG/pkgs/container/lightrag). For more details about docker deployment, please refer to [DockerDeployment.md](./DockerDeployment.md).
 
 ### Nginx Reverse Proxy Configuration
 
@@ -213,7 +237,7 @@ server {
 
 ### Offline Deployment
 
-Official LightRAG Docker images are fully compatible with offline or air-gapped environments. If you want to build up you own  offline enviroment, please refer to [Offline Deployment Guide](./../../docs/OfflineDeployment.md).
+Official LightRAG Docker images are fully compatible with offline or air-gapped environments. If you want to build up you own  offline enviroment, please refer to [Offline Deployment Guide](./OfflineDeployment.md).
 
 ### Starting Multiple LightRAG Instances
 
@@ -244,8 +268,9 @@ The command-line `workspace` argument and the `WORKSPACE` environment variable i
 - **For Qdrant vector database, data isolation is achieved through payload-based partitioning (Qdrant's recommended multitenancy approach):** `QdrantVectorDBStorage` uses shared collections with payload filtering for unlimited workspace scalability.
 - **For relational databases, data isolation is achieved by adding a `workspace` field to the tables for logical data separation:** `PGKVStorage`, `PGVectorStorage`, `PGDocStatusStorage`.
 - **For graph databases, logical data isolation is achieved through labels:** `Neo4JStorage`, `MemgraphStorage`
+- **For OpenSearch, data isolation is achieved through index name prefixes:** `OpenSearchKVStorage`, `OpenSearchDocStatusStorage`, `OpenSearchGraphStorage`, `OpenSearchVectorDBStorage`
 
-To maintain compatibility with legacy data, the default workspace for PostgreSQL is `default` and for Neo4j is `base` when no workspace is configured. For all external storages, the system provides dedicated workspace environment variables to override the common `WORKSPACE` environment variable configuration. These storage-specific workspace environment variables are: `REDIS_WORKSPACE`, `MILVUS_WORKSPACE`, `QDRANT_WORKSPACE`, `MONGODB_WORKSPACE`, `POSTGRES_WORKSPACE`, `NEO4J_WORKSPACE`, `MEMGRAPH_WORKSPACE`.
+To maintain compatibility with legacy data, the default workspace for PostgreSQL is `default` and for Neo4j is `base` when no workspace is configured. For all external storages, the system provides dedicated workspace environment variables to override the common `WORKSPACE` environment variable configuration. These storage-specific workspace environment variables are: `REDIS_WORKSPACE`, `MILVUS_WORKSPACE`, `QDRANT_WORKSPACE`, `MONGODB_WORKSPACE`, `POSTGRES_WORKSPACE`, `NEO4J_WORKSPACE`, `MEMGRAPH_WORKSPACE`, `OPENSEARCH_WORKSPACE`.
 
 ### Multiple workers for Gunicorn + Uvicorn
 
@@ -296,7 +321,7 @@ After starting the lightrag-server, you can add an Ollama-type connection in the
 
 Open WebUI uses an LLM to do the session title and session keyword generation task. So the Ollama chat completion API detects and forwards OpenWebUI session-related requests directly to the underlying LLM. Screenshot from Open WebUI:
 
-![image-20250323194750379](./README.assets/image-20250323194750379.png)
+![image-20250323194750379](./LightRAG-API-Server.assets/image-20250323194750379.png)
 
 ### Choose Query mode in chat
 
@@ -364,10 +389,18 @@ LightRAG API Server implements JWT-based authentication using the HS256 algorith
 
 ```bash
 # For jwt auth
-AUTH_ACCOUNTS='admin:admin123,user1:pass456'
+AUTH_ACCOUNTS='admin:{bcrypt}$2b$12$replace-with-generated-hash,user1:pass456'
 TOKEN_SECRET='your-key'
 TOKEN_EXPIRE_HOURS=4
 ```
+
+Passwords without a prefix are treated as plaintext. To store a bcrypt password, prefix the generated hash with `{bcrypt}`. The easiest way to generate a value that can be pasted directly into `AUTH_ACCOUNTS` is:
+
+```bash
+lightrag-hash-password --username admin
+```
+
+The command prompts for the password and prints an `admin:{bcrypt}...` entry ready to paste into `.env`.
 
 > Currently, only the configuration of an administrator account and password is supported. A comprehensive account system is yet to be developed and implemented.
 
@@ -411,13 +444,12 @@ EMBEDDING_MODEL=your-embedding-deployment-name
 
 ## LightRAG Server Configuration in Detail
 
-The API Server can be configured in three ways (highest priority first):
+The API Server can be configured in two ways (highest priority first):
 
 * Command line arguments
 * Environment variables or .env file
-* Config.ini (Only for storage configuration)
 
-Most of the configurations come with default settings; check out the details in the sample file: `.env.example`. Data storage configuration can also be set by config.ini. A sample file `config.ini.example` is provided for your convenience.
+Most of the configurations come with default settings; check out the details in the sample file: `.env.example`. Storage configuration should also be set through environment variables or the `.env` file.
 
 ### LLM and Embedding Backend Supported
 
@@ -470,6 +502,8 @@ LightRAG uses 4 types of storage for different purposes:
 
 LightRAG Server offers various storage implementations, with the default being an in-memory database that persists data to the WORKING_DIR directory. Additionally, LightRAG supports a wide range of storage solutions including PostgreSQL, MongoDB, FAISS, Milvus, Qdrant, Neo4j, Memgraph, and Redis. For detailed information on supported storage options, please refer to the storage section in the README.md file located in the root directory.
 
+**Milvus Index Configuration:** LightRAG now supports configurable index types for Milvus vector storage (AUTOINDEX, HNSW, HNSW_SQ, IVF_FLAT, etc.) through environment variables. HNSW_SQ requires Milvus 2.6.8+ and provides significant memory savings. See the "Using Milvus for Vector Storage" section in the main README.md for complete configuration options.
+
 You can select the storage implementation by configuring environment variables. For instance, prior to the initial launch of the API server, you can set the following environment variable to specify your desired storage implementation:
 
 ```
@@ -479,11 +513,11 @@ LIGHTRAG_GRAPH_STORAGE=PGGraphStorage
 LIGHTRAG_DOC_STATUS_STORAGE=PGDocStatusStorage
 ```
 
-You cannot change storage implementation selection after adding documents to LightRAG. Data migration from one storage implementation to another is not supported yet. For further information, please read the sample env file or config.ini file.
+You cannot change storage implementation selection after adding documents to LightRAG. Data migration from one storage implementation to another is not supported yet. For further information, please read the sample `.env.example` file.
 
 ### LLM Cache Migration Between Storage Types
 
-When switching the storage implementation in LightRAG, the LLM cache can be migrated from the existing storage to the new one. Subsequently, when re-uploading files to the new storage, the pre-existing LLM cache will significantly accelerate file processing. For detailed instructions on using the LLM cache migration tool, please refer to[README_MIGRATE_LLM_CACHE.md](../tools/README_MIGRATE_LLM_CACHE.md)
+When switching the storage implementation in LightRAG, the LLM cache can be migrated from the existing storage to the new one. Subsequently, when re-uploading files to the new storage, the pre-existing LLM cache will significantly accelerate file processing. For detailed instructions on using the LLM cache migration tool, please refer to [README_MIGRATE_LLM_CACHE.md](../lightrag/tools/README_MIGRATE_LLM_CACHE.md)
 
 ### LightRAG API Server Command Line Options
 
@@ -516,7 +550,7 @@ The rerank provider is configured via the `.env` file. Below is an example confi
 ```
 RERANK_BINDING=cohere
 RERANK_MODEL=BAAI/bge-reranker-v2-m3
-RERANK_BINDING_HOST=http://localhost:8000/v1/rerank
+RERANK_BINDING_HOST=http://localhost:8000/rerank
 RERANK_BINDING_API_KEY=your_rerank_api_key_here
 ```
 
@@ -624,7 +658,7 @@ EMBEDDING_BINDING=ollama
 EMBEDDING_BINDING_HOST=http://localhost:11434
 
 ### For JWT Auth
-# AUTH_ACCOUNTS='admin:admin123,user1:pass456'
+# AUTH_ACCOUNTS='admin:{bcrypt}$2b$12$replace-with-generated-hash,user1:pass456'
 # TOKEN_SECRET=your-key-for-LightRAG-API-Server-xxx
 # TOKEN_EXPIRE_HOURS=48
 

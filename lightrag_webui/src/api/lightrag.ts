@@ -620,7 +620,7 @@ export const queryTextStream = async (
           } catch (refreshError) {
             console.error('Failed to refresh guest token for streaming:', refreshError);
             navigationService.navigateToLogin();
-            throw new Error('Failed to refresh authentication');
+            throw new Error('Failed to refresh authentication', { cause: refreshError });
           }
         }
 
@@ -722,27 +722,27 @@ export const queryTextStream = async (
       let userMessage = message;
 
       switch (statusCode) {
-      case 403:
-        userMessage = 'You do not have permission to access this resource (403 Forbidden)';
-        console.error('Permission denied for stream request:', message);
-        break;
-      case 404:
-        userMessage = 'The requested resource does not exist (404 Not Found)';
-        console.error('Resource not found for stream request:', message);
-        break;
-      case 429:
-        userMessage = 'Too many requests, please try again later (429 Too Many Requests)';
-        console.error('Rate limited for stream request:', message);
-        break;
-      case 500:
-      case 502:
-      case 503:
-      case 504:
-        userMessage = `Server error, please try again later (${statusCode})`;
-        console.error('Server error for stream request:', message);
-        break;
-      default:
-        console.error('Stream request failed with status code:', statusCode, message);
+        case 403:
+          userMessage = 'You do not have permission to access this resource (403 Forbidden)';
+          console.error('Permission denied for stream request:', message);
+          break;
+        case 404:
+          userMessage = 'The requested resource does not exist (404 Not Found)';
+          console.error('Resource not found for stream request:', message);
+          break;
+        case 429:
+          userMessage = 'Too many requests, please try again later (429 Too Many Requests)';
+          console.error('Rate limited for stream request:', message);
+          break;
+        case 500:
+        case 502:
+        case 503:
+        case 504:
+          userMessage = `Server error, please try again later (${statusCode})`;
+          console.error('Server error for stream request:', message);
+          break;
+        default:
+          console.error('Stream request failed with status code:', statusCode, message);
       }
 
       if (onError) {
@@ -922,14 +922,13 @@ export const cancelPipeline = async (): Promise<{
 }
 
 export const loginToServer = async (username: string, password: string): Promise<LoginResponse> => {
-  const formData = new FormData();
+  const formData = new URLSearchParams();
   formData.append('username', username);
   formData.append('password', password);
+  formData.append('grant_type', 'password');
 
   const response = await axiosInstance.post('/login', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
   });
 
   return response.data;
@@ -1003,14 +1002,176 @@ export const getTrackStatus = async (trackId: string): Promise<TrackStatusRespon
   return response.data
 }
 
+type InFlightPaginatedDocumentRequest = {
+  controller: AbortController
+  promise: Promise<PaginatedDocsResponse>
+  subscriberCount: number
+}
+
+const getPaginatedDocumentsRequestKey = (request: DocumentsRequest): string =>
+  JSON.stringify(request)
+
+// Deduplicate in-flight paginated document requests with identical parameters.
+// This prevents duplicate backend calls caused by overlapping timers/effects or
+// React StrictMode double-mount behavior in development.
+const inFlightPaginatedDocumentRequests = new Map<
+  string,
+  InFlightPaginatedDocumentRequest
+>()
+
+const releasePaginatedDocumentSubscriber = (
+  requestKey: string,
+  requestEntry: InFlightPaginatedDocumentRequest,
+  abortIfLastSubscriber: boolean
+): void => {
+  requestEntry.subscriberCount = Math.max(0, requestEntry.subscriberCount - 1)
+
+  if (requestEntry.subscriberCount !== 0) {
+    return
+  }
+
+  if (inFlightPaginatedDocumentRequests.get(requestKey) === requestEntry) {
+    inFlightPaginatedDocumentRequests.delete(requestKey)
+  }
+
+  if (abortIfLastSubscriber) {
+    requestEntry.controller.abort()
+  }
+}
+
+const subscribeToPaginatedDocumentsRequest = (
+  request: DocumentsRequest
+): {
+    requestKey: string
+    requestEntry: InFlightPaginatedDocumentRequest
+    release: (abortIfLastSubscriber: boolean) => void
+  } => {
+  const requestKey = getPaginatedDocumentsRequestKey(request)
+  let requestEntry = inFlightPaginatedDocumentRequests.get(requestKey)
+
+  if (!requestEntry) {
+    const controller = new AbortController()
+    requestEntry = {
+      controller,
+      subscriberCount: 0,
+      promise: paginatedDocumentsPost(request, controller)
+        .finally(() => {
+          if (inFlightPaginatedDocumentRequests.get(requestKey) === requestEntry) {
+            inFlightPaginatedDocumentRequests.delete(requestKey)
+          }
+        })
+    }
+    inFlightPaginatedDocumentRequests.set(requestKey, requestEntry)
+  }
+
+  requestEntry.subscriberCount += 1
+
+  let released = false
+  const release = (abortIfLastSubscriber: boolean): void => {
+    if (released) {
+      return
+    }
+    released = true
+    releasePaginatedDocumentSubscriber(
+      requestKey,
+      requestEntry,
+      abortIfLastSubscriber
+    )
+  }
+
+  return {
+    requestKey,
+    requestEntry,
+    release
+  }
+}
+
+const defaultPaginatedDocumentsPost = async (
+  request: DocumentsRequest,
+  controller: AbortController
+): Promise<PaginatedDocsResponse> => {
+  const response = await axiosInstance.post('/documents/paginated', request, {
+    signal: controller.signal
+  })
+  return response.data
+}
+
+let paginatedDocumentsPost = defaultPaginatedDocumentsPost
+
+export const abortDocumentsPaginated = (request: DocumentsRequest): void => {
+  const requestKey = getPaginatedDocumentsRequestKey(request)
+  const inFlightRequest = inFlightPaginatedDocumentRequests.get(requestKey)
+
+  if (!inFlightRequest) {
+    return
+  }
+
+  inFlightPaginatedDocumentRequests.delete(requestKey)
+  inFlightRequest.controller.abort()
+}
+
+export const __resetPaginatedDocumentRequestsForTests = (): void => {
+  for (const { controller } of inFlightPaginatedDocumentRequests.values()) {
+    controller.abort()
+  }
+  inFlightPaginatedDocumentRequests.clear()
+  paginatedDocumentsPost = defaultPaginatedDocumentsPost
+}
+
+export const __setPaginatedDocumentsPostForTests = (
+  post: typeof defaultPaginatedDocumentsPost
+): void => {
+  paginatedDocumentsPost = post
+}
+
 /**
  * Get documents with pagination support
  * @param request The pagination request parameters
  * @returns Promise with paginated documents response
  */
 export const getDocumentsPaginated = async (request: DocumentsRequest): Promise<PaginatedDocsResponse> => {
-  const response = await axiosInstance.post('/documents/paginated', request)
-  return response.data
+  const { requestEntry, release } = subscribeToPaginatedDocumentsRequest(request)
+
+  try {
+    return await requestEntry.promise
+  } finally {
+    release(false)
+  }
+}
+
+export const getDocumentsPaginatedWithTimeout = (
+  request: DocumentsRequest,
+  timeoutMs: number = 30000,
+  errorMsg: string = 'Document fetch timeout'
+): Promise<PaginatedDocsResponse> => {
+  const { requestEntry, release } = subscribeToPaginatedDocumentsRequest(request)
+
+  return new Promise<PaginatedDocsResponse>((resolve, reject) => {
+    let timedOut = false
+    const timeoutId = setTimeout(() => {
+      timedOut = true
+      release(true)
+      reject(new Error(errorMsg))
+    }, timeoutMs)
+
+    requestEntry.promise
+      .then(response => {
+        if (timedOut) {
+          return
+        }
+        clearTimeout(timeoutId)
+        release(false)
+        resolve(response)
+      })
+      .catch(error => {
+        if (timedOut) {
+          return
+        }
+        clearTimeout(timeoutId)
+        release(false)
+        reject(error)
+      })
+  })
 }
 
 /**
