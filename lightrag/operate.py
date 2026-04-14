@@ -80,6 +80,16 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=False
 
 from datetime import datetime
 
+# Map LLM binding names to LiteLLM provider prefixes
+BINDING_TO_LITELLM = {
+    "openai": "openai",
+    "azure_openai": "azure",
+    "ollama": "ollama",
+    "gemini": "gemini",
+    "lollms": "openai",
+    "bedrock": "bedrock",
+}
+
 
 def _log_timing(operation_name: str, elapsed_ms: float) -> None:
     """Log timing with timestamp for performance analysis."""
@@ -3033,6 +3043,54 @@ async def extract_entities(
     return chunk_results
 
 
+# ---------------------------------------------------------------------------
+# Excel Tool Integration Helpers (Phase 3)
+# ---------------------------------------------------------------------------
+
+async def execute_tool_search(
+    tool_calls: list,
+    tool_definitions: list,
+    tool_manager,
+) -> list[dict]:
+    """Execute LiteLLM tool calls via the ExcelToolManager.
+
+    Takes native LiteLLM tool_call objects, resolves tool names to IDs,
+    runs searches, and returns tool-role messages for the LLM conversation.
+
+    Args:
+        tool_calls: List of LiteLLM tool call objects (with .id, .function.name, .function.arguments).
+        tool_definitions: List of ToolDefinition objects.
+        tool_manager: ExcelToolManager instance.
+
+    Returns:
+        List of tool-role message dicts ready for LiteLLM conversation.
+    """
+    name_to_id = {td.name: td.tool_id for td in tool_definitions}
+    messages = []
+
+    for tc in tool_calls:
+        func_name = tc.function.name
+        func_args = json.loads(tc.function.arguments)
+        logger.info(f"[kg_query] Executing tool: {func_name}({func_args})")
+
+        tool_id = name_to_id.get(func_name)
+        rows = []
+        if tool_id:
+            try:
+                rows = await tool_manager.search(tool_id, func_args, top_k=10)
+            except Exception as e:
+                logger.warning(f"[kg_query] Tool search failed for {func_name}: {e}")
+
+        messages.append({
+            "tool_call_id": tc.id,
+            "role": "tool",
+            "name": func_name,
+            "content": json.dumps(rows, default=str),
+        })
+
+    return messages
+
+
 async def kg_query(
     query: str,
     knowledge_graph_inst: BaseGraphStorage,
@@ -3044,6 +3102,7 @@ async def kg_query(
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
     chunks_vdb: BaseVectorStorage = None,
+    tool_manager=None,
 ) -> QueryResult | None:
     """
     Execute knowledge graph query and return unified QueryResult object.
@@ -3196,6 +3255,18 @@ async def kg_query(
         context_data=context_result.context,
     )
 
+    # Load tool definitions for native LiteLLM tool calling
+    tool_definitions = []
+    if tool_manager is not None:
+        try:
+            tool_definitions = await tool_manager.get_all_tool_definitions()
+            if tool_definitions:
+                logger.debug(
+                    f"[kg_query] Loaded {len(tool_definitions)} tool definitions for native calling"
+                )
+        except Exception as e:
+            logger.warning(f"[kg_query] Failed to load tool definitions: {e}")
+
     user_query = query
 
     if query_param.only_need_prompt:
@@ -3237,19 +3308,95 @@ async def kg_query(
         response = cached_response
         mf_trace.trace_llm_call(cache_hit=True, cache_type="query")
     else:
-        llm_start = time.perf_counter()
-        response = await use_model_func(
-            user_query,
-            system_prompt=sys_prompt,
-            history_messages=query_param.conversation_history,
-            enable_cot=True,
-            stream=query_param.stream,
-        )
-        _llm_elapsed = (time.perf_counter() - llm_start) * 1000
-        _log_timing("kg_query.llm_call", _llm_elapsed)
-        mf_trace.trace_llm_call(
-            cache_hit=False, cache_type="query", latency_ms=_llm_elapsed
-        )
+        # When tools are available, use LiteLLM for native tool calling
+        if tool_definitions and tool_manager is not None:
+            from litellm import acompletion
+            from lightrag.tools.excel_tool_manager import generate_tool_schema
+
+            tools = [generate_tool_schema(td) for td in tool_definitions]
+
+            binding = global_config.get("llm_binding", "openai")
+            litellm_prefix = BINDING_TO_LITELLM.get(binding, "openai")
+            model_name = f"{litellm_prefix}/{global_config.get('llm_model_name', 'gpt-4o-mini')}"
+            litellm_api_base = global_config.get("llm_binding_host") or None
+            litellm_api_key = global_config.get("llm_binding_api_key") or None
+
+            # Build messages for LiteLLM
+            messages = []
+            if sys_prompt:
+                messages.append({"role": "system", "content": sys_prompt})
+            for msg in (query_param.conversation_history or []):
+                messages.append(msg)
+            messages.append({"role": "user", "content": user_query})
+
+            # First call — non-streaming to capture tool_calls
+            llm_start = time.perf_counter()
+            first_response = await acompletion(
+                model=model_name,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                api_base=litellm_api_base,
+                api_key=litellm_api_key,
+            )
+            assistant_msg = first_response.choices[0].message
+            _llm_elapsed = (time.perf_counter() - llm_start) * 1000
+            _log_timing("kg_query.llm_call", _llm_elapsed)
+            mf_trace.trace_llm_call(
+                cache_hit=False, cache_type="query", latency_ms=_llm_elapsed
+            )
+
+            if assistant_msg.tool_calls:
+                # Execute each tool call
+                messages.append(assistant_msg)
+                tool_result_messages = await execute_tool_search(
+                    assistant_msg.tool_calls, tool_definitions, tool_manager
+                )
+                messages.extend(tool_result_messages)
+
+                # Second call — with tool results, respects original stream setting
+                llm2_start = time.perf_counter()
+                second_response = await acompletion(
+                    model=model_name,
+                    messages=messages,
+                    stream=query_param.stream,
+                    api_base=litellm_api_base,
+                    api_key=litellm_api_key,
+                )
+                _llm2_elapsed = (time.perf_counter() - llm2_start) * 1000
+                _log_timing("kg_query.llm_tool_followup", _llm2_elapsed)
+
+                if query_param.stream:
+                    litellm_stream = second_response
+
+                    async def _litellm_to_text_stream():
+                        async for chunk in litellm_stream:
+                            content = chunk.choices[0].delta.content
+                            if content:
+                                yield content
+
+                    response = _litellm_to_text_stream()
+                else:
+                    response = second_response.choices[0].message.content or ""
+            else:
+                # LLM chose not to call tools — use response directly
+                response = assistant_msg.content or ""
+
+        else:
+            # No tools — existing use_model_func path (unchanged)
+            llm_start = time.perf_counter()
+            response = await use_model_func(
+                user_query,
+                system_prompt=sys_prompt,
+                history_messages=query_param.conversation_history,
+                enable_cot=True,
+                stream=query_param.stream,
+            )
+            _llm_elapsed = (time.perf_counter() - llm_start) * 1000
+            _log_timing("kg_query.llm_call", _llm_elapsed)
+            mf_trace.trace_llm_call(
+                cache_hit=False, cache_type="query", latency_ms=_llm_elapsed
+            )
 
         if hashing_kv and hashing_kv.global_config.get("enable_llm_cache"):
             queryparam_dict = {
@@ -3265,17 +3412,19 @@ async def kg_query(
                 "user_prompt": query_param.user_prompt or "",
                 "enable_rerank": query_param.enable_rerank,
             }
-            await save_to_cache(
-                hashing_kv,
-                CacheData(
-                    args_hash=args_hash,
-                    content=response,
-                    prompt=query,
-                    mode=query_param.mode,
-                    cache_type="query",
-                    queryparam=queryparam_dict,
-                ),
-            )
+            # Only cache non-streaming, non-tool responses
+            if isinstance(response, str):
+                await save_to_cache(
+                    hashing_kv,
+                    CacheData(
+                        args_hash=args_hash,
+                        content=response,
+                        prompt=query,
+                        mode=query_param.mode,
+                        cache_type="query",
+                        queryparam=queryparam_dict,
+                    ),
+                )
 
     # Return unified result based on actual response type
     if isinstance(response, str):

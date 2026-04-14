@@ -328,6 +328,15 @@ class LightRAG:
     llm_model_name: str = field(default="gpt-4o-mini")
     """Name of the LLM model used for generating responses."""
 
+    llm_binding: str = field(default="openai")
+    """LLM provider binding type (openai, azure_openai, ollama, gemini, lollms, bedrock)."""
+
+    llm_binding_host: str = field(default="")
+    """Base URL for the LLM provider endpoint."""
+
+    llm_binding_api_key: str = field(default="")
+    """API key for the LLM provider."""
+
     summary_max_tokens: int = field(
         default=int(os.getenv("SUMMARY_MAX_TOKENS", DEFAULT_SUMMARY_MAX_TOKENS))
     )
@@ -2781,6 +2790,8 @@ summarize_entity_descriptions            system_prompt (Optional[str]): Custom p
             query_result = None
 
             if param.mode in ["local", "global", "hybrid", "mix"]:
+                # Pass tool_manager if available (Excel Tools integration)
+                _tool_manager = getattr(self, "_tool_manager", None)
                 query_result = await kg_query(
                     query.strip(),
                     self.chunk_entity_relation_graph,
@@ -2792,6 +2803,7 @@ summarize_entity_descriptions            system_prompt (Optional[str]): Custom p
                     hashing_kv=self.llm_response_cache,
                     system_prompt=system_prompt,
                     chunks_vdb=self.chunks_vdb,
+                    tool_manager=_tool_manager,
                 )
             elif param.mode == "naive":
                 query_result = await naive_query(

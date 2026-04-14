@@ -52,6 +52,8 @@ from lightrag.api.routers.document_routes import (
 from lightrag.api.routers.query_routes import create_query_routes
 from lightrag.api.routers.graph_routes import create_graph_routes
 from lightrag.api.routers.ollama_api import OllamaAPI
+from lightrag.api.routers.tools_routes import create_tools_routes
+from lightrag.tools.excel_tool_manager import ExcelToolManager
 
 from lightrag.utils import logger, set_verbose_debug
 from lightrag.kg.shared_storage import (
@@ -1108,6 +1110,9 @@ def create_app(args):
             workspace=args.workspace,
             llm_model_func=create_llm_model_func(args.llm_binding),
             llm_model_name=args.llm_model,
+            llm_binding=args.llm_binding,
+            llm_binding_host=args.llm_binding_host,
+            llm_binding_api_key=args.llm_binding_api_key,
             llm_model_max_async=args.max_async,
             summary_max_tokens=args.summary_max_tokens,
             summary_context_size=args.summary_context_size,
@@ -1152,6 +1157,33 @@ def create_app(args):
     )
     app.include_router(create_query_routes(rag, api_key, args.top_k))
     app.include_router(create_graph_routes(rag, api_key))
+
+    # Add Excel Tools routes
+    try:
+        import configparser as _cp
+        _redis_cfg = _cp.ConfigParser()
+        _redis_cfg.read("config.ini", "utf-8")
+        _redis_url = os.environ.get(
+            "REDIS_URI",
+            _redis_cfg.get("redis", "uri", fallback="redis://localhost:6379"),
+        )
+        from redis.asyncio import Redis as AsyncRedis, ConnectionPool as RedisPool
+        _tools_pool = RedisPool.from_url(_redis_url, decode_responses=True)
+        _tools_redis = AsyncRedis(connection_pool=_tools_pool)
+        _workspace = args.workspace or "default"
+        tool_manager = ExcelToolManager(
+            redis_client=_tools_redis,
+            namespace=_workspace,
+        )
+        app.include_router(create_tools_routes(tool_manager, api_key))
+        # Store tool_manager on app state and rag instance for query flow
+        app.state.tool_manager = tool_manager
+        rag._tool_manager = tool_manager
+        logger.info("Excel Tools routes enabled")
+    except ImportError:
+        logger.info("Redis not available — Excel Tools routes disabled")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Excel Tools: {e}")
 
     # Add Ollama API routes
     ollama_api = OllamaAPI(rag, top_k=args.top_k, api_key=api_key)

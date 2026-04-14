@@ -28,7 +28,7 @@ As a LightRAG user, I want to upload Excel files and define them as LLM tools wi
 | AC-009 | A list of registered tools is displayed on the Tools tab with name and description | Must |
 | AC-010 | User can delete a registered tool from the list | Must |
 | AC-011 | The LLM is provided with all registered tool definitions during every RAG query | Must |
-| AC-012 | When the LLM calls a tool, the system performs combined similarity + full-text search on the search-by columns | Must |
+| AC-012 | When the LLM calls a tool, the system performs full-text search on the search-by columns | Must |
 | AC-013 | Tool search returns up to 10 matching rows by default | Must |
 | AC-014 | Tool results are returned to the LLM as structured data for inclusion in the response | Must |
 | AC-015 | Duplicate tool names are rejected with an error message | Should |

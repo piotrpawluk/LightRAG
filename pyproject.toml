@@ -91,6 +91,7 @@ api = [
     "uvicorn",
     "gunicorn",
     # Document processing dependencies (required for API document upload functionality)
+    "litellm>=1.30.0",              # Native LLM tool calling
     "openpyxl>=3.0.0,<4.0.0",      # XLSX processing
     "pycryptodome>=3.0.0,<4.0.0",  # PDF encryption support
     "pypdf>=6.1.0",                 # PDF processing

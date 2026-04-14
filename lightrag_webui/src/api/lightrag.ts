@@ -1021,3 +1021,63 @@ export const getDocumentStatusCounts = async (): Promise<StatusCountsResponse> =
   const response = await axiosInstance.get('/documents/status_counts')
   return response.data
 }
+
+// ---- Excel Tools API ----
+
+export type ToolParameterDef = {
+  column_name: string
+  param_name: string
+  param_description: string
+}
+
+export type ToolDef = {
+  tool_id: string
+  name: string
+  description: string
+  parameters: ToolParameterDef[]
+  column_names?: string[]
+  search_columns?: string[]
+  row_count: number
+  created_at: string
+}
+
+export type UploadToolFileResponse = {
+  columns: string[]
+  row_count: number
+  file_id: string
+}
+
+export type CreateToolRequest = {
+  file_id: string
+  name: string
+  description: string
+  parameters: ToolParameterDef[]
+}
+
+export const uploadToolFile = async (
+  file: File,
+  onUploadProgress?: (progressEvent: any) => void
+): Promise<UploadToolFileResponse> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await axiosInstance.post('/tools/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress,
+  })
+  return response.data
+}
+
+export const createTool = async (request: CreateToolRequest): Promise<ToolDef> => {
+  const response = await axiosInstance.post('/tools', request)
+  return response.data
+}
+
+export const listTools = async (): Promise<{ tools: ToolDef[] }> => {
+  const response = await axiosInstance.get('/tools')
+  return response.data
+}
+
+export const deleteTool = async (toolId: string): Promise<{ deleted: boolean; tool_id: string }> => {
+  const response = await axiosInstance.delete(`/tools/${toolId}`)
+  return response.data
+}

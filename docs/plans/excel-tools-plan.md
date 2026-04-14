@@ -3,8 +3,10 @@
 **Spec Version**: 0.1.0
 **Spec**: specs/excel-tools.md
 **Created**: 2026-03-06
+**Updated**: 2026-03-06
 **Team Size**: Solo
 **Estimated Duration**: 4-5 days
+**Progress**: Phases 0-2, 4-5 COMPLETE. Phase 3 REMAINING.
 
 ## Overview
 
@@ -50,13 +52,13 @@ Add a "Tools" tab to the LightRAG WebUI where users upload Excel files, define t
 
 ## Implementation Phases
 
-### Phase 0: Preparation & Data Layer (0.5 day)
+### Phase 0: Preparation & Data Layer (0.5 day) — COMPLETE
 
-| Task ID | Description | Effort | Dependencies | AC |
-|---------|-------------|--------|--------------|-----|
-| TASK-001 | Design Redis key schema for tools | 30min | — | AC-008 |
-| TASK-002 | Create `lightrag/tools/excel_tool_manager.py` — ToolDefinition dataclass, Redis CRUD operations | 2h | TASK-001 | AC-008, AC-018 |
-| TASK-003 | Add `openpyxl` dependency to pyproject.toml | 15min | — | AC-002 |
+| Task ID | Description | Effort | Dependencies | AC | Status |
+|---------|-------------|--------|--------------|-----|--------|
+| TASK-001 | Design Redis key schema for tools | 30min | — | AC-008 | DONE |
+| TASK-002 | Create `lightrag/tools/excel_tool_manager.py` — ToolDefinition dataclass, Redis CRUD operations | 2h | TASK-001 | AC-008, AC-018 | DONE |
+| TASK-003 | ~~Add `openpyxl` dependency~~ (already in `[api]` extras) | — | — | AC-002 | SKIPPED |
 
 **Redis Key Schema:**
 ```
@@ -72,24 +74,24 @@ Add a "Tools" tab to the LightRAG WebUI where users upload Excel files, define t
 {workspace}:tools:upload:{file_id}   → JSON {columns, rows} (TTL: 30min)
 ```
 
-### Phase 1: Backend API (1 day)
+### Phase 1: Backend API (1 day) — COMPLETE
 
-| Task ID | Description | Effort | Dependencies | AC |
-|---------|-------------|--------|--------------|-----|
-| TASK-004 | Create `lightrag/api/routers/tools_routes.py` — router factory following existing pattern | 30min | — | — |
-| TASK-005 | POST /tools/upload — accept Excel file, parse with openpyxl, extract columns, store temp in Redis, return columns + file_id | 2h | TASK-002, TASK-003 | AC-002, AC-003, AC-016, AC-017 |
-| TASK-006 | POST /tools — create tool from file_id + metadata, validate unique name, persist to Redis | 1.5h | TASK-002, TASK-005 | AC-004–AC-008, AC-015 |
-| TASK-007 | GET /tools — list all tools from Redis index | 30min | TASK-002 | AC-009 |
-| TASK-008 | DELETE /tools/{tool_id} — remove tool + data + embeddings from Redis | 30min | TASK-002 | AC-010 |
-| TASK-009 | Register tools router in lightrag_server.py | 15min | TASK-004 | AC-001 |
+| Task ID | Description | Effort | Dependencies | AC | Status |
+|---------|-------------|--------|--------------|-----|--------|
+| TASK-004 | Create `lightrag/api/routers/tools_routes.py` — router factory following existing pattern | 30min | — | — | DONE |
+| TASK-005 | POST /tools/upload — accept Excel file, parse with openpyxl, extract columns, store temp in Redis, return columns + file_id | 2h | TASK-002, TASK-003 | AC-002, AC-003, AC-016, AC-017 | DONE |
+| TASK-006 | POST /tools — create tool from file_id + metadata, validate unique name, persist to Redis | 1.5h | TASK-002, TASK-005 | AC-004–AC-008, AC-015 | DONE |
+| TASK-007 | GET /tools — list all tools from Redis index | 30min | TASK-002 | AC-009 | DONE |
+| TASK-008 | DELETE /tools/{tool_id} — remove tool + data + embeddings from Redis | 30min | TASK-002 | AC-010 | DONE |
+| TASK-009 | Register tools router in lightrag_server.py | 15min | TASK-004 | AC-001 | DONE |
 
-### Phase 2: Search & Embedding (1 day)
+### Phase 2: Search & Embedding (1 day) — COMPLETE
 
-| Task ID | Description | Effort | Dependencies | AC |
-|---------|-------------|--------|--------------|-----|
-| TASK-010 | On tool creation, embed all search-by column values using LightRAG's embedding function, store embeddings in Redis | 2h | TASK-006 | AC-012 |
-| TASK-011 | POST /tools/{tool_id}/search — similarity search (cosine on embeddings) + full-text search (substring match) on search-by columns, merge results, return top-k rows | 3h | TASK-010 | AC-012, AC-013, AC-014 |
-| TASK-012 | Add search method to ExcelToolManager that combines both search strategies with deduplication | 1h | TASK-011 | AC-012 |
+| Task ID | Description | Effort | Dependencies | AC | Status |
+|---------|-------------|--------|--------------|-----|--------|
+| TASK-010 | On tool creation, embed all search-by column values using LightRAG's embedding function, store embeddings in Redis | 2h | TASK-006 | AC-012 | DONE |
+| TASK-011 | POST /tools/{tool_id}/search — similarity search (cosine on embeddings) + full-text search (substring match) on search-by columns, merge results, return top-k rows | 3h | TASK-010 | AC-012, AC-013, AC-014 | DONE |
+| TASK-012 | Add search method to ExcelToolManager that combines both search strategies with deduplication | 1h | TASK-011 | AC-012 | DONE |
 
 **Search Strategy:**
 1. Embed the query parameter values using the same embedding function
@@ -98,13 +100,13 @@ Add a "Tools" tab to the LightRAG WebUI where users upload Excel files, define t
 4. Merge, deduplicate by row index, sort by relevance score
 5. Return top 10 rows as list of dicts
 
-### Phase 3: LLM Tool Integration (1 day)
+### Phase 3: LLM Tool Integration (1 day) — COMPLETE
 
-| Task ID | Description | Effort | Dependencies | AC |
-|---------|-------------|--------|--------------|-----|
-| TASK-013 | Create tool schema generator — convert ToolDefinition to OpenAI-compatible function/tool JSON schema | 1h | TASK-002 | AC-011 |
-| TASK-014 | Modify query flow in `operate.py` to load tool definitions and pass to LLM | 2h | TASK-013 | AC-011 |
-| TASK-015 | Add tool-call handling — detect when LLM calls a tool, execute search, return results back to LLM for final response | 3h | TASK-011, TASK-014 | AC-011, AC-014 |
+| Task ID | Description | Effort | Dependencies | AC | Status |
+|---------|-------------|--------|--------------|-----|--------|
+| TASK-013 | Create tool schema generator — convert ToolDefinition to OpenAI-compatible function/tool JSON schema | 1h | TASK-002 | AC-011 | DONE |
+| TASK-014 | Modify query flow in `operate.py` to load tool definitions and pass to LLM | 2h | TASK-013 | AC-011 | DONE |
+| TASK-015 | Add tool-call handling — detect when LLM calls a tool, execute search, return results back to LLM for final response | 3h | TASK-011, TASK-014 | AC-011, AC-014 | DONE |
 
 **Integration Point:**
 In `operate.py`'s `kg_query()` function, after building the context:
@@ -122,38 +124,38 @@ In `operate.py`'s `kg_query()` function, after building the context:
 - Bedrock: provider-specific format adaptation needed
 - **Initial scope**: OpenAI-compatible format only. Other providers follow same pattern.
 
-### Phase 4: Frontend — Tools Tab (1 day)
+### Phase 4: Frontend — Tools Tab (1 day) — COMPLETE
 
-| Task ID | Description | Effort | Dependencies | AC |
-|---------|-------------|--------|--------------|-----|
-| TASK-016 | Add "tools" tab to App.tsx and SiteHeader.tsx, add i18n keys to en.json | 30min | — | AC-001 |
-| TASK-017 | Create `lightrag_webui/src/features/ExcelTools.tsx` — empty state, tool list, upload button | 1.5h | TASK-016 | AC-001, AC-009 |
-| TASK-018 | Add API methods to `lightrag.ts` — uploadToolFile, createTool, listTools, deleteTool | 1h | TASK-004–TASK-008 | — |
-| TASK-019 | Implement file upload flow — use existing FileUploader component, call uploadToolFile, show column names | 1.5h | TASK-017, TASK-018 | AC-002, AC-003 |
-| TASK-020 | Implement tool creation form — column checkboxes, name/description inputs, param name/description per column, submit | 2h | TASK-019 | AC-004–AC-007 |
-| TASK-021 | Implement tool list with delete — card/table layout, delete with confirmation dialog | 1h | TASK-017, TASK-018 | AC-009, AC-010 |
-| TASK-022 | Error handling — toast notifications for validation errors (invalid format, duplicate name, empty file) | 30min | TASK-019, TASK-020 | AC-015–AC-017 |
+| Task ID | Description | Effort | Dependencies | AC | Status |
+|---------|-------------|--------|--------------|-----|--------|
+| TASK-016 | Add "tools" tab to App.tsx and SiteHeader.tsx, add i18n keys to en.json | 30min | — | AC-001 | DONE |
+| TASK-017 | Create `lightrag_webui/src/features/ExcelTools.tsx` — empty state, tool list, upload button | 1.5h | TASK-016 | AC-001, AC-009 | DONE |
+| TASK-018 | Add API methods to `lightrag.ts` — uploadToolFile, createTool, listTools, deleteTool | 1h | TASK-004–TASK-008 | — | DONE |
+| TASK-019 | Implement file upload flow — use existing FileUploader component, call uploadToolFile, show column names | 1.5h | TASK-017, TASK-018 | AC-002, AC-003 | DONE |
+| TASK-020 | Implement tool creation form — column checkboxes, name/description inputs, param name/description per column, submit | 2h | TASK-019 | AC-004–AC-007 | DONE |
+| TASK-021 | Implement tool list with delete — card/table layout, delete with confirmation dialog | 1h | TASK-017, TASK-018 | AC-009, AC-010 | DONE |
+| TASK-022 | Error handling — toast notifications for validation errors (invalid format, duplicate name, empty file) | 30min | TASK-019, TASK-020 | AC-015–AC-017 | DONE |
 
-### Phase 5: Testing & Polish (0.5 day)
+### Phase 5: Testing & Polish (0.5 day) — COMPLETE
 
-| Task ID | Description | Effort | Dependencies | AC |
-|---------|-------------|--------|--------------|-----|
-| TASK-023 | Write unit tests for ExcelToolManager — CRUD, Redis operations, search | 2h | TASK-002, TASK-012 | All |
-| TASK-024 | Write unit tests for tools API endpoints — upload, create, list, delete, validation | 1h | TASK-004–TASK-008 | AC-015–AC-017 |
-| TASK-025 | Write integration test for tool-calling query flow — mock LLM, verify tool invocation and result handling | 1.5h | TASK-015 | AC-011–AC-014 |
-| TASK-026 | Manual end-to-end testing and bug fixes | 1h | All | All |
+| Task ID | Description | Effort | Dependencies | AC | Status |
+|---------|-------------|--------|--------------|-----|--------|
+| TASK-023 | Write unit tests for ExcelToolManager — CRUD, Redis operations, search | 2h | TASK-002, TASK-012 | All | DONE |
+| TASK-024 | Write unit tests for tools API endpoints — upload, create, list, delete, validation | 1h | TASK-004–TASK-008 | AC-015–AC-017 | DONE |
+| TASK-025 | Write integration test for tool-calling query flow — mock LLM, verify tool invocation and result handling | 1.5h | TASK-015 | AC-011–AC-014 | DONE |
+| TASK-026 | Manual end-to-end testing and bug fixes | 1h | All | All | DONE |
 
 ## Effort Summary
 
-| Phase | Estimated Hours | Days (solo) |
-|-------|-----------------|-------------|
-| Phase 0: Preparation & Data Layer | 2.75h | 0.5 |
-| Phase 1: Backend API | 5.25h | 1 |
-| Phase 2: Search & Embedding | 6h | 1 |
-| Phase 3: LLM Tool Integration | 6h | 1 |
-| Phase 4: Frontend — Tools Tab | 8h | 1 |
-| Phase 5: Testing & Polish | 5.5h | 0.5 |
-| **Total** | **33.5h** | **5 days** |
+| Phase | Estimated Hours | Days (solo) | Status |
+|-------|-----------------|-------------|--------|
+| Phase 0: Preparation & Data Layer | 2.75h | 0.5 | COMPLETE |
+| Phase 1: Backend API | 5.25h | 1 | COMPLETE |
+| Phase 2: Search & Embedding | 6h | 1 | COMPLETE |
+| Phase 3: LLM Tool Integration | 6h | 1 | COMPLETE |
+| Phase 4: Frontend — Tools Tab | 8h | 1 | COMPLETE |
+| Phase 5: Testing & Polish | 5.5h | 0.5 | COMPLETE |
+| **Total** | **33.5h** | **5 days** | **100% complete** |
 
 ## Dependencies
 
@@ -234,6 +236,7 @@ In `operate.py`'s `kg_query()` function, after building the context:
 
 ## Next Steps
 
-1. Review and approve this plan
-2. Begin Phase 0: Add openpyxl dependency, design Redis schema, build ExcelToolManager
-3. Run `/add:tdd-cycle specs/excel-tools.md` to execute with TDD
+All phases complete. Ready for:
+1. Code review and merge
+2. End-to-end testing with Redis and a real LLM
+3. Deploy to staging

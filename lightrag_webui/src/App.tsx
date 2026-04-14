@@ -14,6 +14,7 @@ import { ZapIcon } from 'lucide-react'
 import GraphViewer from '@/features/GraphViewer'
 import DocumentManager from '@/features/DocumentManager'
 import RetrievalTesting from '@/features/RetrievalTesting'
+import ExcelTools from '@/features/ExcelTools'
 import ApiSite from '@/features/ApiSite'
 
 import { Tabs, TabsContent } from '@/components/ui/Tabs'
@@ -212,6 +213,9 @@ function App() {
                 </TabsContent>
                 <TabsContent value="retrieval" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
                   <RetrievalTesting />
+                </TabsContent>
+                <TabsContent value="tools" className="absolute top-0 right-0 bottom-0 left-0 overflow-auto">
+                  <ExcelTools />
                 </TabsContent>
                 <TabsContent value="api" className="absolute top-0 right-0 bottom-0 left-0 overflow-hidden">
                   <ApiSite />
