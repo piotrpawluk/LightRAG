@@ -46,6 +46,32 @@ afterEach(() => {
   apiModule.__resetPaginatedDocumentRequestsForTests()
 })
 
+describe('buildReprocessPayload (AC-005 from_scratch)', () => {
+  test('returns undefined with no options (legacy reprocess-all)', () => {
+    expect(apiModule.buildReprocessPayload()).toBeUndefined()
+    expect(apiModule.buildReprocessPayload({})).toBeUndefined()
+  })
+
+  test('includes from_scratch when set', () => {
+    expect(apiModule.buildReprocessPayload({ fromScratch: true })).toEqual({
+      from_scratch: true
+    })
+  })
+
+  test('includes document_ids and from_scratch together', () => {
+    expect(
+      apiModule.buildReprocessPayload({
+        documentIds: ['doc-1', 'doc-2'],
+        fromScratch: true
+      })
+    ).toEqual({ document_ids: ['doc-1', 'doc-2'], from_scratch: true })
+  })
+
+  test('omits empty document_ids array', () => {
+    expect(apiModule.buildReprocessPayload({ documentIds: [] })).toBeUndefined()
+  })
+})
+
 describe('getDocumentsPaginated', () => {
   test('issues a fresh request after aborting a timed-out in-flight request', async () => {
     const request: DocumentsRequest = {
