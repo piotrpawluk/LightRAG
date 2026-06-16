@@ -4,6 +4,7 @@ from pathlib import Path
 
 import asyncio
 import json
+import time
 import json_repair
 from typing import Any, AsyncIterator, overload, Literal
 from collections import Counter, defaultdict
@@ -71,7 +72,6 @@ from lightrag.constants import (
 )
 from lightrag.kg.shared_storage import get_storage_keyed_lock
 from lightrag import mlflow_integration as mf_trace
-import time
 from dotenv import load_dotenv
 
 # use the .env that is inside the current folder
@@ -2909,6 +2909,33 @@ async def merge_nodes_and_edges(
         pipeline_status["history_messages"].append(log_message)
 
 
+def _serialize_extraction_for_checkpoint(
+    full_doc_id: str | None,
+    chunk_order_index: int | None,
+    maybe_nodes: dict,
+    maybe_edges: dict,
+) -> dict:
+    """Build a JSON-serializable checkpoint record for one chunk's extraction.
+
+    Edge keys are (src, tgt) tuples, which are not valid JSON object keys, so
+    edges are stored as a list of ``[[src, tgt], values]`` pairs and rebuilt by
+    :func:`_deserialize_extraction_checkpoint`.
+    """
+    return {
+        "full_doc_id": full_doc_id,
+        "chunk_order_index": chunk_order_index,
+        "nodes": {key: list(value) for key, value in maybe_nodes.items()},
+        "edges": [[list(key), value] for key, value in maybe_edges.items()],
+    }
+
+
+def _deserialize_extraction_checkpoint(record: dict) -> tuple[dict, dict]:
+    """Reconstruct ``(maybe_nodes, maybe_edges)`` from a checkpoint record."""
+    nodes = dict(record.get("nodes", {}))
+    edges = {tuple(key): value for key, value in record.get("edges", [])}
+    return nodes, edges
+
+
 async def extract_entities(
     chunks: dict[str, TextChunkSchema],
     global_config: dict[str, str],
@@ -2916,6 +2943,7 @@ async def extract_entities(
     pipeline_status_lock=None,
     llm_response_cache: BaseKVStorage | None = None,
     text_chunks_storage: BaseKVStorage | None = None,
+    extraction_checkpoint: BaseKVStorage | None = None,
 ) -> list:
     # Check for cancellation at the start of entity extraction
     if pipeline_status is not None and pipeline_status_lock is not None:
@@ -3115,6 +3143,17 @@ async def extract_entities(
                 pipeline_status["latest_message"] = log_message
                 pipeline_status["history_messages"].append(log_message)
 
+        # Persist this chunk's extraction so a later failure can resume from here
+        if extraction_checkpoint is not None:
+            checkpoint_record = _serialize_extraction_for_checkpoint(
+                chunk_dp.get("full_doc_id"),
+                chunk_dp.get("chunk_order_index"),
+                maybe_nodes,
+                maybe_edges,
+            )
+            checkpoint_record["created_at"] = int(time.time())
+            await extraction_checkpoint.upsert({chunk_key: checkpoint_record})
+
         # Return the extracted nodes and edges for centralized processing
         return maybe_nodes, maybe_edges
 
@@ -3143,10 +3182,44 @@ async def extract_entities(
                 prefixed_exception = create_prefixed_exception(e, chunk_id)
                 raise prefixed_exception from e
 
+    # Resume support: load any chunks already extracted in a previous (failed) run
+    # so we only re-send the missing chunks to the LLM.
+    checkpointed_results: list = []
+    chunks_to_process = ordered_chunks
+    if extraction_checkpoint is not None and ordered_chunks:
+        all_chunk_keys = {c[0] for c in ordered_chunks}
+        keys_to_process = await extraction_checkpoint.filter_keys(all_chunk_keys)
+        if len(keys_to_process) < len(all_chunk_keys):
+            done_keys = [k for k in all_chunk_keys if k not in keys_to_process]
+            for record in await extraction_checkpoint.get_by_ids(done_keys):
+                if record:
+                    checkpointed_results.append(
+                        _deserialize_extraction_checkpoint(record)
+                    )
+            chunks_to_process = [c for c in ordered_chunks if c[0] in keys_to_process]
+            processed_chunks = len(checkpointed_results)
+            resume_msg = (
+                f"Resuming extraction: {len(checkpointed_results)}/{total_chunks} "
+                f"chunks already extracted, {len(chunks_to_process)} remaining"
+            )
+            logger.info(resume_msg)
+            if pipeline_status is not None and pipeline_status_lock is not None:
+                async with pipeline_status_lock:
+                    pipeline_status["latest_message"] = resume_msg
+                    pipeline_status["history_messages"].append(resume_msg)
+
     tasks = []
-    for c in ordered_chunks:
+    for c in chunks_to_process:
         task = asyncio.create_task(_process_with_semaphore(c))
         tasks.append(task)
+
+    # All chunks were already checkpointed — nothing left to extract.
+    if not tasks:
+        mf_trace.trace_operation(
+            "lightrag.insert.extraction",
+            {"chunks_processed": len(checkpointed_results), "total_chunks": total_chunks},
+        )
+        return checkpointed_results
 
     # Wait for tasks to complete or for the first exception to occur
     # This allows us to cancel remaining tasks if any task fails
@@ -3185,13 +3258,15 @@ async def extract_entities(
         prefixed_exception = create_prefixed_exception(first_exception, progress_prefix)
         raise prefixed_exception from first_exception
 
-    # If all tasks completed successfully, chunk_results already contains the results
-    # Return the chunk_results for later processing in merge_nodes_and_edges
+    # If all tasks completed successfully, chunk_results contains the freshly
+    # extracted chunks; prepend any results restored from the checkpoint so the
+    # merge phase sees the full document (resumed run == clean run).
+    all_results = checkpointed_results + chunk_results
     mf_trace.trace_operation(
         "lightrag.insert.extraction",
-        {"chunks_processed": len(chunk_results), "total_chunks": total_chunks},
+        {"chunks_processed": len(all_results), "total_chunks": total_chunks},
     )
-    return chunk_results
+    return all_results
 
 
 # ---------------------------------------------------------------------------

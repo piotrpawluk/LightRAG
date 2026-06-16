@@ -500,8 +500,37 @@ export const scanNewDocuments = async (): Promise<ScanResponse> => {
   return response.data
 }
 
-export const reprocessFailedDocuments = async (): Promise<ReprocessFailedResponse> => {
-  const response = await axiosInstance.post('/documents/reprocess_failed')
+export type ReprocessOptions = {
+  documentIds?: string[]
+  fromScratch?: boolean
+}
+
+/**
+ * Build the optional request body for /documents/reprocess_failed.
+ * Returns undefined when there is nothing to send (preserving the legacy
+ * no-body behavior that reprocesses all eligible documents).
+ */
+export const buildReprocessPayload = (
+  opts?: ReprocessOptions
+): { document_ids?: string[]; from_scratch?: boolean } | undefined => {
+  if (!opts) return undefined
+  const payload: { document_ids?: string[]; from_scratch?: boolean } = {}
+  if (opts.documentIds && opts.documentIds.length > 0) {
+    payload.document_ids = opts.documentIds
+  }
+  if (opts.fromScratch) {
+    payload.from_scratch = true
+  }
+  return Object.keys(payload).length > 0 ? payload : undefined
+}
+
+export const reprocessFailedDocuments = async (
+  opts?: ReprocessOptions
+): Promise<ReprocessFailedResponse> => {
+  const response = await axiosInstance.post(
+    '/documents/reprocess_failed',
+    buildReprocessPayload(opts)
+  )
   return response.data
 }
 

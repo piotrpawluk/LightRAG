@@ -738,6 +738,15 @@ class LightRAG:
             embedding_func=self.embedding_func,
         )
 
+        # Per-chunk extraction checkpoints for resumable ingestion: each record
+        # holds one chunk's extracted entities/relations so a failed run can
+        # resume without re-running the LLM for chunks already processed.
+        self.extraction_checkpoint: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+            namespace=NameSpace.KV_STORE_EXTRACTION_CHECKPOINT,
+            workspace=self.workspace,
+            embedding_func=self.embedding_func,
+        )
+
         self.chunk_entity_relation_graph: BaseGraphStorage = self.graph_storage_cls(  # type: ignore
             namespace=NameSpace.GRAPH_STORE_CHUNK_ENTITY_RELATION,
             workspace=self.workspace,
@@ -815,6 +824,7 @@ class LightRAG:
                 self.full_relations,
                 self.entity_chunks,
                 self.relation_chunks,
+                self.extraction_checkpoint,
                 self.entities_vdb,
                 self.relationships_vdb,
                 self.chunks_vdb,
@@ -839,6 +849,7 @@ class LightRAG:
                 ("full_relations", self.full_relations),
                 ("entity_chunks", self.entity_chunks),
                 ("relation_chunks", self.relation_chunks),
+                ("extraction_checkpoint", self.extraction_checkpoint),
                 ("entities_vdb", self.entities_vdb),
                 ("relationships_vdb", self.relationships_vdb),
                 ("chunks_vdb", self.chunks_vdb),
@@ -2054,7 +2065,11 @@ class LightRAG:
                                             "file_path": file_path,
                                             "track_id": status_doc.track_id,  # Preserve existing track_id
                                             "metadata": {
-                                                "processing_start_time": processing_start_time
+                                                "processing_start_time": processing_start_time,
+                                                "pipeline_phase": "extraction",
+                                                "extracted_chunks": await self._count_checkpointed_chunks(
+                                                    list(chunks.keys())
+                                                ),
                                             },
                                         }
                                     }
@@ -2154,6 +2169,10 @@ class LightRAG:
                                         "metadata": {
                                             "processing_start_time": processing_start_time,
                                             "processing_end_time": processing_end_time,
+                                            "pipeline_phase": "extraction",
+                                            "extracted_chunks": await self._count_checkpointed_chunks(
+                                                failed_chunks_list
+                                            ),
                                         },
                                     }
                                 }
@@ -2211,10 +2230,19 @@ class LightRAG:
                                             "metadata": {
                                                 "processing_start_time": processing_start_time,
                                                 "processing_end_time": processing_end_time,
+                                                "pipeline_phase": "completed",
+                                                "extracted_chunks": len(chunks),
                                             },
                                         }
                                     }
                                 )
+
+                                # Document fully processed: discard its per-chunk
+                                # extraction checkpoints (resume state no longer needed).
+                                if self.extraction_checkpoint is not None:
+                                    await self.extraction_checkpoint.delete(
+                                        list(chunks.keys())
+                                    )
 
                                 # Call _insert_done after processing each file
                                 await self._insert_done()
@@ -2286,6 +2314,10 @@ class LightRAG:
                                             "metadata": {
                                                 "processing_start_time": processing_start_time,
                                                 "processing_end_time": processing_end_time,
+                                                "pipeline_phase": "merge",
+                                                "extracted_chunks": await self._count_checkpointed_chunks(
+                                                    failed_chunks_list
+                                                ),
                                             },
                                         }
                                     }
@@ -2365,6 +2397,7 @@ class LightRAG:
                 pipeline_status_lock=pipeline_status_lock,
                 llm_response_cache=self.llm_response_cache,
                 text_chunks_storage=self.text_chunks,
+                extraction_checkpoint=self.extraction_checkpoint,
             )
             return chunk_results
         except Exception as e:
@@ -2374,6 +2407,69 @@ class LightRAG:
                 pipeline_status["latest_message"] = error_msg
                 pipeline_status["history_messages"].append(error_msg)
             raise e
+
+    async def aclear_extraction_checkpoint(self, doc_ids: list[str]) -> None:
+        """Discard saved per-chunk extraction progress for the given documents.
+
+        This is the core of the "reprocess from scratch" path: clearing a
+        document's checkpoint forces the next run to re-extract every chunk
+        instead of resuming. Chunk ids are resolved from each document's
+        ``chunks_list`` in doc_status.
+        """
+        if self.extraction_checkpoint is None:
+            return
+
+        chunk_ids: list[str] = []
+        for doc_id in doc_ids:
+            status = await self.doc_status.get_by_id(doc_id)
+            if status:
+                chunk_ids.extend(status.get("chunks_list") or [])
+
+        if chunk_ids:
+            await self.extraction_checkpoint.delete(chunk_ids)
+            await self.extraction_checkpoint.index_done_callback()
+
+    async def _count_checkpointed_chunks(self, chunk_keys: list[str]) -> int:
+        """Return how many of ``chunk_keys`` already have an extraction checkpoint."""
+        if not self.extraction_checkpoint or not chunk_keys:
+            return 0
+        unique_keys = set(chunk_keys)
+        remaining = await self.extraction_checkpoint.filter_keys(unique_keys)
+        return len(unique_keys) - len(remaining)
+
+    async def areprocess_documents_from_scratch(self, doc_ids: list[str]) -> None:
+        """Reset documents so the next pipeline run reprocesses them from scratch.
+
+        Discards each document's per-chunk extraction checkpoints and sets its
+        status back to PENDING (clearing any resume cursor), so the subsequent
+        pipeline run re-extracts every chunk instead of resuming. Callers trigger
+        the pipeline afterwards (e.g. the /documents/reprocess_failed route).
+        """
+        await self.aclear_extraction_checkpoint(doc_ids)
+
+        now = datetime.now(timezone.utc).isoformat()
+        updates: dict[str, dict] = {}
+        for doc_id in doc_ids:
+            status = await self.doc_status.get_by_id(doc_id)
+            if not status:
+                continue
+            updates[doc_id] = {
+                "status": DocStatus.PENDING,
+                "chunks_count": status.get("chunks_count"),
+                "chunks_list": status.get("chunks_list", []),
+                "content_summary": status.get("content_summary"),
+                "content_length": status.get("content_length"),
+                "created_at": status.get("created_at"),
+                "updated_at": now,
+                "file_path": status.get("file_path"),
+                "track_id": status.get("track_id"),
+                "error_msg": "",
+                "metadata": {},
+            }
+
+        if updates:
+            await self.doc_status.upsert(updates)
+            await self.doc_status.index_done_callback()
 
     async def _insert_done(
         self, pipeline_status=None, pipeline_status_lock=None
@@ -2388,6 +2484,7 @@ class LightRAG:
                 self.full_relations,
                 self.entity_chunks,
                 self.relation_chunks,
+                self.extraction_checkpoint,
                 self.llm_response_cache,
                 self.entities_vdb,
                 self.relationships_vdb,

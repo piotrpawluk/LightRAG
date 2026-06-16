@@ -17,6 +17,8 @@ import Checkbox from '@/components/ui/Checkbox'
 import UploadDocumentsDialog from '@/components/documents/UploadDocumentsDialog'
 import ClearDocumentsDialog from '@/components/documents/ClearDocumentsDialog'
 import DeleteDocumentsDialog from '@/components/documents/DeleteDocumentsDialog'
+import ReprocessFromScratchDialog from '@/components/documents/ReprocessFromScratchDialog'
+import { getResumeProgress } from '@/lib/documentResume'
 import PaginationControls from '@/components/ui/PaginationControls'
 
 import {
@@ -1226,6 +1228,12 @@ export default function DocumentManager() {
                 onDocumentsDeleted={handleDocumentsDeleted}
               />
             )}
+            {isSelectionMode && (
+              <ReprocessFromScratchDialog
+                selectedDocIds={selectedDocIds}
+                onReprocessStarted={handleDocumentsDeleted}
+              />
+            )}
             {isSelectionMode && hasCurrentPageSelection ? (
               (() => {
                 const buttonProps = getSelectionButtonProps();
@@ -1487,6 +1495,22 @@ export default function DocumentManager() {
                               {doc.status === 'failed' && (
                                 <span className="text-red-600">{t('documentPanel.documentManager.status.failed')}</span>
                               )}
+
+                              {/* Resume progress indicator (AC-007/AC-008): shown for
+                                  processing/failed docs that have a partial checkpoint */}
+                              {(() => {
+                                const resume = getResumeProgress(doc)
+                                if (!resume) return null
+                                return (
+                                  <span className="ml-2 text-xs text-muted-foreground whitespace-nowrap">
+                                    {t('documentPanel.documentManager.status.resumeProgress', {
+                                      phase: resume.phase,
+                                      extracted: resume.extracted,
+                                      total: resume.total
+                                    })}
+                                  </span>
+                                )
+                              })()}
 
                               {/* Icon rendering logic */}
                               {doc.error_msg ? (

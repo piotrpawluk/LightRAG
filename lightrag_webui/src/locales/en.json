@@ -79,6 +79,20 @@
       "busy": "Pipeline is busy, please try again later",
       "notAllowed": "No permission to perform this operation"
     },
+    "reprocessFromScratch": {
+      "button": "Reprocess from scratch",
+      "tooltip": "Discard saved progress and reprocess {{count}} selected document(s) from the beginning",
+      "title": "Reprocess {{count}} document(s) from scratch?",
+      "description": "This discards saved extraction progress and re-runs every chunk through the LLM for the selected documents.",
+      "warning": "WARNING: Saved progress will be lost and LLM usage will be incurred for every chunk.",
+      "confirmPrompt": "Type 'yes' to confirm this action",
+      "confirmPlaceholder": "Type yes to confirm",
+      "confirmButton": "Reprocess",
+      "reprocessing": "Starting…",
+      "success": "Reprocessing {{count}} document(s) from scratch started",
+      "failed": "Reprocess Failed:\n{{message}}",
+      "error": "Reprocess Failed:\n{{error}}"
+    },
     "selectDocuments": {
       "selectCurrentPage": "Select Current Page ({{count}})",
       "deselectAll": "Deselect All ({{count}})"
@@ -143,7 +157,8 @@
         "preprocessed": "Preprocessed",
         "processing": "Processing",
         "pending": "Pending",
-        "failed": "Failed"
+        "failed": "Failed",
+        "resumeProgress": "{{phase}} {{extracted}}/{{total}}"
       },
       "errors": {
         "loadFailed": "Failed to load documents\n{{error}}",

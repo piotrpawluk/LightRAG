@@ -173,6 +173,24 @@ class ScanResponse(BaseModel):
     )
 
 
+class ReprocessRequest(BaseModel):
+    """Optional request body for reprocessing documents.
+
+    With no body, the endpoint reprocesses all eligible (failed/pending/processing)
+    documents as before. With a body, it can target specific documents and/or force
+    a from-scratch reprocess that discards saved extraction checkpoints.
+    """
+
+    document_ids: Optional[List[str]] = Field(
+        default=None,
+        description="Limit reprocessing to these document ids. Omit/null = all eligible documents.",
+    )
+    from_scratch: bool = Field(
+        default=False,
+        description="When true, discard saved extraction progress for the targeted documents and re-extract every chunk from the beginning.",
+    )
+
+
 class ReprocessResponse(BaseModel):
     """Response model for reprocessing failed documents operation
 
@@ -3388,7 +3406,10 @@ def create_document_routes(
         response_model=ReprocessResponse,
         dependencies=[Depends(combined_auth)],
     )
-    async def reprocess_failed_documents(background_tasks: BackgroundTasks):
+    async def reprocess_failed_documents(
+        background_tasks: BackgroundTasks,
+        request: Optional[ReprocessRequest] = None,
+    ):
         """
         Reprocess failed and pending documents.
 
@@ -3414,14 +3435,39 @@ def create_document_routes(
             HTTPException: If an error occurs while initiating reprocessing (500).
         """
         try:
+            from_scratch = bool(request and request.from_scratch)
+            document_ids = (request.document_ids if request else None) or []
+
+            if from_scratch:
+                # Resolve target documents: explicit ids, or all currently-failed docs.
+                if not document_ids:
+                    failed_docs = await rag.doc_status.get_docs_by_status(
+                        DocStatus.FAILED
+                    )
+                    document_ids = list(failed_docs.keys())
+                # Discard saved extraction progress and reset to PENDING so the
+                # pipeline re-extracts every chunk from the beginning.
+                await rag.areprocess_documents_from_scratch(document_ids)
+                message = (
+                    f"Reprocessing {len(document_ids)} document(s) from scratch has been "
+                    "initiated in background. Saved extraction progress was discarded."
+                )
+            else:
+                message = (
+                    "Reprocessing of failed documents has been initiated in background. "
+                    "Documents retain their original track_id."
+                )
+
             # Start the reprocessing in the background
             # Note: Reprocessed documents retain their original track_id from initial upload
             background_tasks.add_task(rag.apipeline_process_enqueue_documents)
-            logger.info("Reprocessing of failed documents initiated")
+            logger.info(
+                f"Reprocessing of documents initiated (from_scratch={from_scratch})"
+            )
 
             return ReprocessResponse(
                 status="reprocessing_started",
-                message="Reprocessing of failed documents has been initiated in background. Documents retain their original track_id.",
+                message=message,
             )
 
         except Exception as e:
